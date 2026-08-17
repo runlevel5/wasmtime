@@ -530,6 +530,46 @@ per-proposal support table in `docs/stability-tiers.md` (needs a clean spec
 suite run to fill in honestly), and `ci/build-build-matrix.js` plus a
 `ci/docker/ppc64le-linux/Dockerfile` for release artifacts.
 
+### Phase 4 — SIGSEGV root cause and spec-suite results (2026-08-18, Fable 5)
+
+The core-dump analysis found frame #2 of the crash was two instruction
+words (`mflr r0; blr`) where a return address belonged, and the wider
+disassembly showed a spilled vmctx at `[SP+0]` clobbered with a return
+address **two calls up**. Root cause: **ELFv2 native callees own a
+32-byte header at the bottom of the caller's frame** (back-chain, CR, LR,
+TOC saves) and write it unconditionally — our frames only reserved it
+when stack args existed. Second, related ABI bug: the **parameter save
+area is positional** (every param owns a doubleword slot from SP+32, and
+ints after floats skip the float's GPR position); we packed densely,
+which broke every native call with >8 slots — e.g. the component model's
+13-arg `prepare_call`, whose garbage `storage` pointer was the
+`panic_cannot_unwind` abort. Both fixed (`compute_arg_locs` positional
+scheme for non-Tail; Tail stays dense; probestack gets a scratch header).
+
+Also debugged along the way: the full-suite runs were being SIGKILLed by
+the OOM killer (~42 GB anon RSS — likely 64 KiB-page amplification of
+page-granular touches, 16× x86) — masked as mystery crashes. Chunked
+sequential runs with `--test-threads=4` keep each process bounded; the
+fuzzer VM (`debian12-ppc64`, qemu:///system) was shut down with the
+user's permission, and `/tmp` (RAM tmpfs) holds ~26 GB of fuzzer
+artifacts worth clearing for future runs.
+
+New lowerings from this session: `fcvt_to_{s,u}int{,_sat}` (exclusive
+bounds from `wasmtime_core::math`, NaN→trap or →0), `fmin`/`fmax`
+(xsmindp/xsmaxdp + fadd NaN path), `uadd_overflow_trap`,
+`smin`/`smax`/`umin`/`umax`.
+
+**Spec suite on POWER9: 1808 passed / 146 failed**, every failure
+attributed: ~106 SIMD-family, ~8 atomics, ~6 tail calls, ~2 i128 (plus
+GC-collector echoes of the same). Component-model: **418/418**. Pulley
+(control group, not our backend): 2 failures in `conversions`/
+`simd_conversions` — worth reporting upstream separately.
+
+Remaining before the per-proposal docs table can be filled: decide
+whether to gate SIMD/threads/tail-call proposals off in
+`compiler_panicking_wasm_features` for ppc64 (cleaner UX than compile
+errors), then a final clean suite run.
+
 ### Phase 5 — SIMD via VSX (optional, +2–3 months)
 
 ~236 SIMD ops; POWER8 VSX covers most of wasm SIMD but the patch's SIMD
