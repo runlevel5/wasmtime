@@ -485,6 +485,51 @@ the synced tree — avoids the workspace dev-deps that need wasm32 targets).
   POWER dev cloud) matters for anything signals/cache related that QEMU
   hides.
 
+### Phase 4 — status (2026-08-18)
+
+**Done:** 70 shared runtests execute on ppc64le and all 1295 filetests pass
+on POWER9 (see the Phase 2 notes for the lowering fixes this drove). CI has
+a qemu-ppc64le job; `powerpc64le` is no longer the "no backend" canary
+(loongarch64 took over). `cranelift-object`/`cranelift-jit` handle
+`Ppc64Call`; disassembly works in `objdump`/`explore`/`hot-blocks`. Docs
+updated.
+
+**Spec suite: partially blocked.** Pointing `cargo test --test wast` at a
+POWER9 host found and fixed two lowerings that every real module needs —
+`br_table` and `select_spectre_guard`. Small and medium filtered subsets
+now run to completion and report ordinary pass/fail (for example
+`memory_copy` runs 12 tests, 8 passing).
+
+**Open, and the next thing to solve:** the full 2442-test run dies with
+SIGSEGV before the harness flushes any per-test output. Ruled out so far:
+
+- Not configuration-specific — both the pooling and default engine subsets
+  crash (674 and 1768 tests respectively).
+- Not memory pressure — `WASMTIME_TEST_NO_HOG_MEMORY=1`, which is what CI
+  sets for the emulated targets, makes no difference.
+- Scale-dependent: subsets of roughly a dozen tests are reliably fine.
+
+One earlier single-threaded run failed differently, with
+`libcalls::raw::raise` reaching `panic_cannot_unwind` and aborting. That
+points at the trap-and-unwind path rather than at codegen: something inside
+the libcall panics, and the panic cannot cross the `extern "C"` boundary.
+The most likely candidates are the frame walk in `crates/unwinder` (a bad
+`[FP+8]` read, or the `assert_fp_is_aligned` check) or the interaction
+between a libcall-raised trap and the frame record. Worth reproducing under
+`gdb` on the POWER9 box, and worth checking whether `fixed_frame_storage_size`
+can leave SP 16-byte misaligned, since `gen_clobber_save` subtracts it
+without re-aligning.
+
+This is debugging in the runtime/unwind interaction, so it belongs with
+Fable 5 per §6.
+
+**Also still outstanding:** `ALL_ARCHITECTURES` plus fuzzgen exclusions
+(deliberately deferred — with i128, SIMD and atomics unimplemented a
+partial exclusion list would imply coverage that does not exist), the
+per-proposal support table in `docs/stability-tiers.md` (needs a clean spec
+suite run to fill in honestly), and `ci/build-build-matrix.js` plus a
+`ci/docker/ppc64le-linux/Dockerfile` for release artifacts.
+
 ### Phase 5 — SIMD via VSX (optional, +2–3 months)
 
 ~236 SIMD ops; POWER8 VSX covers most of wasm SIMD but the patch's SIMD
