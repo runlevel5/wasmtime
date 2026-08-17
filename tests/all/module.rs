@@ -14,6 +14,7 @@ fn checks_incompatible_target() -> Result<()> {
         || cfg!(target_arch = "aarch64")
         || cfg!(target_arch = "s390x")
         || cfg!(target_arch = "riscv64")
+        || cfg!(target_arch = "powerpc64")
     {
         let mut target = target_lexicon::Triple::host();
         target.operating_system = target_lexicon::OperatingSystem::Unknown;

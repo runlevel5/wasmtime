@@ -8,6 +8,7 @@ target x86_64 has_bmi2
 target riscv64
 target riscv64 has_c has_zcb
 target s390x
+target powerpc64le
 target pulley32
 target pulley32be
 target pulley64

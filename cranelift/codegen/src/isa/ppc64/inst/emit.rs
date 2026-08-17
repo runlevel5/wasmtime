@@ -325,6 +325,10 @@ impl MachInstEmit for Inst {
                     // subf RT,RA,RB computes RB - RA; swap to get ra - rb.
                     AluOp::Sub => enc_xo(rd, rb, ra, 40),
                     AluOp::Mulld => enc_xo(rd, ra, rb, 233),
+                    AluOp::Mulhd => enc_xo(rd, ra, rb, 73),
+                    AluOp::Mulhdu => enc_xo(rd, ra, rb, 9),
+                    AluOp::Mulhw => enc_xo(rd, ra, rb, 75),
+                    AluOp::Mulhwu => enc_xo(rd, ra, rb, 11),
                     AluOp::And => enc_x_logic(ra, rd, rb, 28),
                     AluOp::Or => enc_x_logic(ra, rd, rb, 444),
                     AluOp::Xor => enc_x_logic(ra, rd, rb, 316),
@@ -469,6 +473,10 @@ impl MachInstEmit for Inst {
                     }
                     FpuOp1::Mov => enc_fmr(rd, rn),
                     FpuOp1::Demote => enc_x_opcd(63, rd, 0, rn, 12), // frsp
+                    // XX2-form; VSR 0-31 alias the FPRs so the extension
+                    // bits stay zero.
+                    FpuOp1::CvtToSingleBits => (60 << 26) | (rd << 21) | (rn << 11) | (267 << 2),
+                    FpuOp1::CvtFromSingleBits => (60 << 26) | (rd << 21) | (rn << 11) | (331 << 2),
                 };
                 sink.put4(word);
             }
@@ -535,6 +543,30 @@ impl MachInstEmit for Inst {
                 let opcd = if ty == F32 { 59 } else { 63 };
                 let xo = if signed { 846 } else { 974 };
                 sink.put4(enc_x_opcd(opcd, reg_num(rd.to_reg()), 0, reg_num(rn), xo));
+            }
+
+            &Inst::FpuSelect { rd, kind, rt, rf } => {
+                // `isel` yields its RA operand when the tested cr0 bit is
+                // set, and reads r0 in that position as a literal zero. So
+                // r11 always holds whichever value the *set* bit selects,
+                // leaving r0 for the other one.
+                let tmp = reg_num(spilltmp_reg());
+                let (bit, polarity) = kind.bit_and_polarity();
+                let (if_set, if_clear) = if polarity { (rt, rf) } else { (rf, rt) };
+                sink.put4(enc_xx1(reg_num(if_set), tmp, 51)); // mfvsrd r11, _
+                sink.put4(enc_xx1(reg_num(if_clear), 0, 51)); // mfvsrd r0, _
+                kind.emit_cmp(sink);
+                sink.put4(enc_isel(tmp, tmp, 0, bit));
+                sink.put4(enc_xx1(reg_num(rd.to_reg()), tmp, 179)); // mtvsrd rd, r11
+            }
+
+            &Inst::EmitIsland { needed_space } => {
+                if sink.island_needed(needed_space) {
+                    let skip = sink.get_label();
+                    Inst::gen_jump(skip).emit(sink, emit_info, state);
+                    sink.emit_island(needed_space + 4, &mut state.ctrl_plane);
+                    sink.bind_label(skip, &mut state.ctrl_plane);
+                }
             }
 
             &Inst::MovToFpr { rd, rn } => {
@@ -744,7 +776,7 @@ impl MachInstEmit for Inst {
                 info.emit_retval_loads::<Ppc64MachineDeps, _, _>(
                     state.frame_layout().stackslots_size,
                     |inst| inst.emit(sink, emit_info, state),
-                    |_needed_space| None,
+                    |needed_space| Some(Inst::EmitIsland { needed_space }),
                 );
 
                 if let Some(try_call) = info.try_call_info.as_ref() {
@@ -781,7 +813,7 @@ impl MachInstEmit for Inst {
                 info.emit_retval_loads::<Ppc64MachineDeps, _, _>(
                     state.frame_layout().stackslots_size,
                     |inst| inst.emit(sink, emit_info, state),
-                    |_needed_space| None,
+                    |needed_space| Some(Inst::EmitIsland { needed_space }),
                 );
 
                 if let Some(try_call) = info.try_call_info.as_ref() {
@@ -831,12 +863,21 @@ impl MachInstEmit for Inst {
             &Inst::Unwind { ref inst } => sink.add_unwind(inst.clone()),
         }
 
-        let end_off = sink.cur_offset();
-        debug_assert!(
-            (end_off - start_off) <= Inst::worst_case_size(),
-            "inst {self:?} longer ({}) than worst-case size",
-            end_off - start_off,
+        // Calls and explicit islands emit their own islands and so are
+        // allowed to exceed the worst-case size; the return-value loads
+        // following a call are unbounded in particular.
+        let emits_own_island = matches!(
+            self,
+            Inst::Call { .. } | Inst::CallInd { .. } | Inst::EmitIsland { .. }
         );
+        if !emits_own_island {
+            let end_off = sink.cur_offset();
+            debug_assert!(
+                (end_off - start_off) <= Inst::worst_case_size(),
+                "inst {self:?} longer ({}) than worst-case size",
+                end_off - start_off,
+            );
+        }
     }
 
     fn pretty_print_inst(&self, state: &mut Self::State) -> String {

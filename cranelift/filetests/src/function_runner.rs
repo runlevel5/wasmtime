@@ -626,7 +626,8 @@ fn make_trampoline(name: UserFuncName, signature: &ir::Signature, isa: &dyn Targ
     target_arch = "x86_64",
     target_arch = "aarch64",
     target_arch = "s390x",
-    target_arch = "riscv64"
+    target_arch = "riscv64",
+    target_arch = "powerpc64"
 ))]
 extern "C-unwind" fn __cranelift_throw(
     entry_fp: usize,
@@ -685,7 +686,8 @@ extern "C-unwind" fn __cranelift_throw(
     target_arch = "x86_64",
     target_arch = "aarch64",
     target_arch = "s390x",
-    target_arch = "riscv64"
+    target_arch = "riscv64",
+    target_arch = "powerpc64"
 )))]
 extern "C-unwind" fn __cranelift_throw(
     _entry_fp: usize,

@@ -49,6 +49,39 @@
   (if-let imm (simm16_from_imm64 n))
   (output_reg (alu_rr_imm16 (AluImmOp.Addi) (put_in_reg y) imm)))
 
+;;;; Rules for `smulhi` / `umulhi` ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(rule 1 (lower (smulhi $I64 x y))
+  (output_reg (ppc_mulhd (put_in_reg x) (put_in_reg y))))
+(rule 1 (lower (umulhi $I64 x y))
+  (output_reg (ppc_mulhdu (put_in_reg x) (put_in_reg y))))
+
+;; The word forms read only the low 32 bits of each operand, so an i32
+;; needs no narrowing; anything smaller is extended to a full word first.
+(rule 0 (lower (smulhi (fits_in_32 ty) x y))
+  (output_reg (ppc_mulhw (put_in_ext_reg x ty true) (put_in_ext_reg y ty true))))
+(rule 0 (lower (umulhi (fits_in_32 ty) x y))
+  (output_reg (ppc_mulhwu (put_in_ext_reg x ty false) (put_in_ext_reg y ty false))))
+
+;; Extend a value to a full 64-bit register unless it already fills the
+;; low word, which the word-wide instructions read in full.
+(decl put_in_ext_reg (Value Type bool) Reg)
+(rule 1 (put_in_ext_reg val $I32 _) (put_in_reg val))
+(rule 0 (put_in_ext_reg val (fits_in_16 ty) signed)
+  (gen_extend (put_in_reg val) signed (ty_bits ty) 64))
+
+;;;; Rules for `bmask` ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;; All ones when the input is non-zero, all zeros otherwise.
+(rule (lower (bmask (fits_in_64 (ty_int _)) val @ (value_type (fits_in_64 in_ty))))
+  (output_reg
+    (gen_select (int_compare (IntCC.NotEqual)
+                             (put_in_cmp_reg val (IntCC.NotEqual) in_ty)
+                             (imm $I64 0)
+                             in_ty)
+                (imm $I64 0xffffffffffffffff)
+                (imm $I64 0))))
+
 ;;;; Rules for `ineg` / `bnot` ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (rule (lower (ineg (fits_in_64 (ty_int _)) x))
@@ -97,28 +130,89 @@
 
 ;;;; Rules for bit counting ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(rule (lower (clz (ty_32_or_64 ty) x))
+(rule 1 (lower (clz (ty_32_or_64 ty) x))
   (output_reg (gen_bitcount (BitOp.Clz) (put_in_reg x) ty)))
 
-(rule (lower (ctz (ty_32_or_64 ty) x))
+(rule 1 (lower (ctz (ty_32_or_64 ty) x))
   (output_reg (gen_bitcount (BitOp.Ctz) (put_in_reg x) ty)))
 
-(rule (lower (popcnt (ty_32_or_64 ty) x))
+(rule 1 (lower (popcnt (ty_32_or_64 ty) x))
   (output_reg (gen_bitcount (BitOp.Popcnt) (put_in_reg x) ty)))
+
+;; Narrower than a word: zero-extend and work in 64 bits. Leading zeros
+;; then need the extension's width subtracting off, and trailing zeros
+;; need a bit set just above the value so a zero input reports the type's
+;; width rather than 64.
+(rule 0 (lower (clz (fits_in_16 ty) x))
+  (output_reg
+    (alu_rr_imm16 (AluImmOp.Addi)
+                  (gen_bitcount (BitOp.Clz)
+                                (gen_extend (put_in_reg x) false (ty_bits ty) 64)
+                                $I64)
+                  (clz_narrow_adjust ty))))
+
+(rule 0 (lower (ctz (fits_in_16 ty) x))
+  (output_reg
+    (gen_bitcount (BitOp.Ctz)
+                  (ppc_or (gen_extend (put_in_reg x) false (ty_bits ty) 64)
+                          (imm $I64 (ty_width_bit ty)))
+                  $I64)))
+
+(rule 0 (lower (popcnt (fits_in_16 ty) x))
+  (output_reg
+    (gen_bitcount (BitOp.Popcnt)
+                  (gen_extend (put_in_reg x) false (ty_bits ty) 64)
+                  $I64)))
+
+;; `-(64 - bits)` as a 16-bit immediate, for the `addi` above.
+(decl clz_narrow_adjust (Type) u16)
+(extern constructor clz_narrow_adjust clz_narrow_adjust)
+
+;; `1 << bits`, the bit just above a narrow value.
+(decl ty_width_bit (Type) u64)
+(extern constructor ty_width_bit ty_width_bit)
 
 ;;;; Rules for division and remainder ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(rule (lower (sdiv (ty_32_or_64 ty) x y))
+(rule 1 (lower (sdiv (ty_32_or_64 ty) x y))
   (output_reg (gen_divrem (DivOp.SDiv) (put_in_reg x) (put_in_reg y) ty)))
 
-(rule (lower (udiv (ty_32_or_64 ty) x y))
+(rule 1 (lower (udiv (ty_32_or_64 ty) x y))
   (output_reg (gen_divrem (DivOp.UDiv) (put_in_reg x) (put_in_reg y) ty)))
 
-(rule (lower (srem (ty_32_or_64 ty) x y))
+(rule 1 (lower (srem (ty_32_or_64 ty) x y))
   (output_reg (gen_divrem (DivOp.SRem) (put_in_reg x) (put_in_reg y) ty)))
 
-(rule (lower (urem (ty_32_or_64 ty) x y))
+(rule 1 (lower (urem (ty_32_or_64 ty) x y))
   (output_reg (gen_divrem (DivOp.URem) (put_in_reg x) (put_in_reg y) ty)))
+
+;; Narrower than a word: extend both operands to a full word (matching the
+;; operation's signedness) and divide there. The divide-by-zero and
+;; overflow checks the word form performs remain correct, since the
+;; extended values span the same numeric range.
+(rule 0 (lower (sdiv (fits_in_16 ty) x y))
+  (output_reg (gen_divrem (DivOp.SDiv)
+                          (gen_extend (put_in_reg x) true (ty_bits ty) 64)
+                          (gen_extend (put_in_reg y) true (ty_bits ty) 64)
+                          $I32)))
+
+(rule 0 (lower (udiv (fits_in_16 ty) x y))
+  (output_reg (gen_divrem (DivOp.UDiv)
+                          (gen_extend (put_in_reg x) false (ty_bits ty) 64)
+                          (gen_extend (put_in_reg y) false (ty_bits ty) 64)
+                          $I32)))
+
+(rule 0 (lower (srem (fits_in_16 ty) x y))
+  (output_reg (gen_divrem (DivOp.SRem)
+                          (gen_extend (put_in_reg x) true (ty_bits ty) 64)
+                          (gen_extend (put_in_reg y) true (ty_bits ty) 64)
+                          $I32)))
+
+(rule 0 (lower (urem (fits_in_16 ty) x y))
+  (output_reg (gen_divrem (DivOp.URem)
+                          (gen_extend (put_in_reg x) false (ty_bits ty) 64)
+                          (gen_extend (put_in_reg y) false (ty_bits ty) 64)
+                          $I32)))
 
 ;;;; Rules for `select` ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -213,15 +307,76 @@
 (rule (lower (fcmp _ cc x y))
   (output_reg (fpu_cmp_set (float_compare cc (put_in_reg x) (put_in_reg y)))))
 
+;;;; Rules for floating-point `select` ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;; `isel` only works on general registers, so both candidates are bounced
+;; through them. The bit patterns are copied verbatim, so this is exact
+;; for `f32` despite its widened in-register form.
+(rule 3 (lower (select (ty_scalar_float ty)
+                       (maybe_uextend (icmp _ cc a @ (value_type (fits_in_64 in_ty)) b))
+                       x y))
+  (output_reg
+    (gen_fpu_select (int_compare cc
+                                 (put_in_cmp_reg a cc in_ty)
+                                 (put_in_cmp_reg b cc in_ty)
+                                 in_ty)
+                    (put_in_reg x)
+                    (put_in_reg y)
+                    ty)))
+
+(rule 2 (lower (select (ty_scalar_float ty) c @ (value_type (fits_in_64 cty)) x y))
+  (output_reg
+    (gen_fpu_select (int_compare (IntCC.NotEqual)
+                                 (put_in_cmp_reg c (IntCC.NotEqual) cty)
+                                 (imm $I64 0)
+                                 cty)
+                    (put_in_reg x)
+                    (put_in_reg y)
+                    ty)))
+
+;;;; Rules for bitwise ops on floating-point types ;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;; CLIF permits the bitwise operations on float types, meaning the bit
+;; pattern of the value. For `f64` the register already holds exactly
+;; those bits; for `f32` they have to be converted out of the widened
+;; form and back.
+(rule 1 (lower (band $F64 x y))
+  (output_reg (mov_to_fpr (ppc_and (mov_from_fpr (put_in_reg x))
+                                   (mov_from_fpr (put_in_reg y))) $F64)))
+(rule 1 (lower (bor $F64 x y))
+  (output_reg (mov_to_fpr (ppc_or (mov_from_fpr (put_in_reg x))
+                                  (mov_from_fpr (put_in_reg y))) $F64)))
+(rule 1 (lower (bxor $F64 x y))
+  (output_reg (mov_to_fpr (ppc_xor (mov_from_fpr (put_in_reg x))
+                                   (mov_from_fpr (put_in_reg y))) $F64)))
+(rule 1 (lower (bnot $F64 x))
+  (output_reg (mov_to_fpr (gen_unary (UnaryOp.Not) (mov_from_fpr (put_in_reg x))) $F64)))
+
+(rule 1 (lower (band $F32 x y))
+  (output_reg (f32_from_bits (ppc_and (f32_to_bits (put_in_reg x))
+                                      (f32_to_bits (put_in_reg y))))))
+(rule 1 (lower (bor $F32 x y))
+  (output_reg (f32_from_bits (ppc_or (f32_to_bits (put_in_reg x))
+                                     (f32_to_bits (put_in_reg y))))))
+(rule 1 (lower (bxor $F32 x y))
+  (output_reg (f32_from_bits (ppc_xor (f32_to_bits (put_in_reg x))
+                                      (f32_to_bits (put_in_reg y))))))
+(rule 1 (lower (bnot $F32 x))
+  (output_reg (f32_from_bits (gen_unary (UnaryOp.Not) (f32_to_bits (put_in_reg x))))))
+
 ;;;; Rules for `bitcast` ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-;; Only the 64-bit transfers are supported: an `f32` is stored widened in
-;; its register, so reinterpreting one as `i32` would mean re-narrowing it.
 (rule (lower (bitcast $I64 _ x @ (value_type $F64)))
   (output_reg (mov_from_fpr (put_in_reg x))))
 
 (rule (lower (bitcast $F64 _ x @ (value_type $I64)))
   (output_reg (mov_to_fpr (put_in_reg x) $F64)))
+
+(rule (lower (bitcast $I32 _ x @ (value_type $F32)))
+  (output_reg (f32_to_bits (put_in_reg x))))
+
+(rule (lower (bitcast $F32 _ x @ (value_type $I32)))
+  (output_reg (f32_from_bits (put_in_reg x))))
 
 ;;;; Rules for `uextend`/`sextend`/`ireduce` ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 

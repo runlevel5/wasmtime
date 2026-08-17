@@ -23,6 +23,12 @@
     (Or)
     (Xor)
     (Mulld)
+    ;; High half of a 64x64 product.
+    (Mulhd)
+    (Mulhdu)
+    ;; High half of a 32x32 product.
+    (Mulhw)
+    (Mulhwu)
 ))
 
 ;; ALU operations with a 16-bit immediate. `Addi` reads the immediate as
@@ -98,6 +104,12 @@
     (Mov)
     ;; Round a double to single precision (`frsp`), for `fdemote`.
     (Demote)
+    ;; Non-signalling conversions between the double held in an FPR and
+    ;; the single-precision encoding in the register's high word. These
+    ;; preserve NaN payloads, which is what makes them usable for
+    ;; reinterpreting an `f32`'s bits.
+    (CvtToSingleBits)
+    (CvtFromSingleBits)
 ))
 
 ;; Load opcodes; selected by type in `LoadOP::from_type`.
@@ -340,6 +352,20 @@
     (Mtlr
       (rs Reg))
 
+    ;; Select between two floating-point values, by bouncing both through
+    ;; general registers so `isel` can pick one. The condition is an
+    ;; integer comparison, as for `Select`.
+    (FpuSelect
+      (rd WritableReg)
+      (kind IntegerCompare)
+      (rt Reg)
+      (rf Reg))
+
+    ;; Request a constant island of the given size. Used by the
+    ;; return-value loads after a call, which can be arbitrarily long.
+    (EmitIsland
+      (needed_space u32))
+
     ;; Read a fixed non-allocatable register (the stack or frame
     ;; pointer, by number) into an ordinary register.
     (MovFromPReg
@@ -392,6 +418,14 @@
 (rule (ppc_xor a b) (alu_rrr (AluOp.Xor) a b))
 (decl ppc_mulld (Reg Reg) Reg)
 (rule (ppc_mulld a b) (alu_rrr (AluOp.Mulld) a b))
+(decl ppc_mulhd (Reg Reg) Reg)
+(rule (ppc_mulhd a b) (alu_rrr (AluOp.Mulhd) a b))
+(decl ppc_mulhdu (Reg Reg) Reg)
+(rule (ppc_mulhdu a b) (alu_rrr (AluOp.Mulhdu) a b))
+(decl ppc_mulhw (Reg Reg) Reg)
+(rule (ppc_mulhw a b) (alu_rrr (AluOp.Mulhw) a b))
+(decl ppc_mulhwu (Reg Reg) Reg)
+(rule (ppc_mulhwu a b) (alu_rrr (AluOp.Mulhwu) a b))
 
 ;; ALU with a 16-bit immediate.
 (decl alu_rr_imm16 (AluImmOp Reg u16) Reg)
@@ -438,6 +472,27 @@
 (rule (gen_divrem op ra rb ty)
   (let ((dst WritableReg (temp_writable_reg $I64))
         (_ Unit (emit (MInst.DivRem op dst ra rb ty))))
+    dst))
+
+;; An `f32` is held in an FPR widened to double, so reinterpreting its
+;; bits means converting to the single-precision encoding first. The
+;; single lands in the register's high word, hence the shifts.
+(decl f32_to_bits (Reg) Reg)
+(rule (f32_to_bits x)
+  (gen_shift (ShiftOp.Srd)
+             (mov_from_fpr (fpu_rr (FpuOp1.CvtToSingleBits) x $F32))
+             (imm $I64 32)))
+
+(decl f32_from_bits (Reg) Reg)
+(rule (f32_from_bits x)
+  (fpu_rr (FpuOp1.CvtFromSingleBits)
+          (mov_to_fpr (gen_shift (ShiftOp.Sld) x (imm $I64 32)) $F32)
+          $F32))
+
+(decl gen_fpu_select (IntegerCompare Reg Reg Type) Reg)
+(rule (gen_fpu_select kind rt rf ty)
+  (let ((dst WritableReg (temp_writable_reg ty))
+        (_ Unit (emit (MInst.FpuSelect dst kind rt rf))))
     dst))
 
 (decl gen_select (IntegerCompare Reg Reg) Reg)

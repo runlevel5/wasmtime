@@ -3,6 +3,7 @@ test run
 set bb_padding_log2_minus_one=12
 target aarch64
 target s390x
+target powerpc64le
 target x86_64
 target riscv64 has_m
 target riscv64 has_c has_zcb

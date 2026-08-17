@@ -111,6 +111,14 @@ fn ppc64_get_operands(inst: &mut Inst, collector: &mut impl OperandVisitor) {
             // from the still-live inputs.
             collector.reg_early_def(rd);
         }
+        Inst::FpuSelect { rd, kind, rt, rf } => {
+            collector.reg_use(&mut kind.rs1);
+            collector.reg_use(&mut kind.rs2);
+            collector.reg_use(rt);
+            collector.reg_use(rf);
+            collector.reg_def(rd);
+        }
+        Inst::EmitIsland { .. } => {}
         Inst::Select { rd, kind, rt, rf } => {
             collector.reg_use(&mut kind.rs1);
             collector.reg_use(&mut kind.rs2);
@@ -319,7 +327,23 @@ impl MachInst for Inst {
     fn rc_for_type(ty: &Type) -> CodegenResult<(&[RegClass], &[Type])> {
         match *ty {
             I8 | I16 | I32 | I64 => Ok((&[RegClass::Int], core::slice::from_ref(ty))),
-            F32 | F64 => Ok((&[RegClass::Float], core::slice::from_ref(ty))),
+            // An `f32` is held in a floating-point register in double
+            // format, because that is what `lfs` produces and what the
+            // arithmetic instructions operate on. Reporting the *stored*
+            // type as `f64` keeps that consistent everywhere a value is
+            // copied by size rather than by lowering rule: spills and
+            // reloads, and the ABI's argument and return slots. Without
+            // it, the shared code that moves a stack-returned value
+            // through an integer register would copy only the four bytes
+            // of the single-precision encoding into a slot that is later
+            // read back as a double.
+            //
+            // The cost is that a stack-passed `f32` occupies its 8-byte
+            // slot in double format rather than as a single in the low
+            // four bytes, which deviates from ELFv2 for calls into C code
+            // that run out of floating-point argument registers.
+            F32 => Ok((&[RegClass::Float], &[F64])),
+            F64 => Ok((&[RegClass::Float], core::slice::from_ref(ty))),
             _ => Err(CodegenError::Unsupported(alloc::format!(
                 "type not yet supported by the ppc64 backend: {ty}"
             ))),
@@ -372,6 +396,10 @@ impl Inst {
                     AluOp::Or => "or",
                     AluOp::Xor => "xor",
                     AluOp::Mulld => "mulld",
+                    AluOp::Mulhd => "mulhd",
+                    AluOp::Mulhdu => "mulhdu",
+                    AluOp::Mulhw => "mulhw",
+                    AluOp::Mulhwu => "mulhwu",
                 };
                 format!("{mnemonic} {}, {}, {}", wreg(*rd), reg(*ra), reg(*rb))
             }
@@ -422,6 +450,16 @@ impl Inst {
                     reg(*rb)
                 )
             }
+            Inst::EmitIsland { needed_space } => format!("emit_island {needed_space}"),
+            Inst::FpuSelect { rd, kind, rt, rf } => format!(
+                "fselect.{} {}, {}, {} # cmp {}, {}",
+                kind.kind,
+                wreg(*rd),
+                reg(*rt),
+                reg(*rf),
+                reg(kind.rs1),
+                reg(kind.rs2)
+            ),
             Inst::Select { rd, kind, rt, rf } => format!(
                 "select.{} {}, {}, {} # cmp {}, {}",
                 kind.kind,
@@ -448,6 +486,8 @@ impl Inst {
                     FpuOp1::Sqrt => "fsqrt",
                     FpuOp1::Mov => "fmr",
                     FpuOp1::Demote => "frsp",
+                    FpuOp1::CvtToSingleBits => "xscvdpspn",
+                    FpuOp1::CvtFromSingleBits => "xscvspdpn",
                 };
                 format!("{mnemonic}.{ty} {}, {}", wreg(*rd), reg(*rn))
             }

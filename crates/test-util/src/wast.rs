@@ -486,6 +486,7 @@ impl Compiler {
                     || cfg!(target_arch = "aarch64")
                     || cfg!(target_arch = "riscv64")
                     || cfg!(target_arch = "s390x")
+                    || cfg!(target_arch = "powerpc64")
             }
             Compiler::Winch => cfg!(target_arch = "x86_64") || cfg!(target_arch = "aarch64"),
             Compiler::CraneliftPulley => true,

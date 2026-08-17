@@ -210,6 +210,7 @@ where
             Architecture::X86_64 => true,
             Architecture::Aarch64(_) => true,
             Architecture::Riscv64(_) => true,
+            Architecture::Powerpc64le => true,
             _ => false,
         };
 

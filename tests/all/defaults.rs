@@ -34,6 +34,13 @@ fn test_tail_call_default() -> Result<()> {
         ),
         (
             line!(),
+            true,
+            Config::new()
+                .strategy(Strategy::Cranelift)
+                .target("powerpc64le")?,
+        ),
+        (
+            line!(),
             false,
             Config::new().strategy(Strategy::Winch).target("x86_64")?,
         ),

@@ -149,6 +149,16 @@ impl generated_code::Context for Ppc64IsleContext<'_, '_, MInst, Ppc64Backend> {
         u16::try_from(ty.bits() - 1).unwrap()
     }
 
+    fn clz_narrow_adjust(&mut self, ty: Type) -> u16 {
+        // The count is taken over a 64-bit zero-extension, so subtract the
+        // bits the extension added.
+        (-((64 - ty.bits()) as i16)) as u16
+    }
+
+    fn ty_width_bit(&mut self, ty: Type) -> u64 {
+        1u64 << ty.bits()
+    }
+
     fn gen_stack_addr(&mut self, slot: StackSlot, offset: Offset32) -> Reg {
         let result = self.temp_writable_reg(I64);
         let i = self

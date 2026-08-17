@@ -10,6 +10,7 @@ target aarch64
 
 set opt_level=speed
 target s390x
+target powerpc64le
 target riscv64
 target riscv64 has_c has_zcb
 target s390x has_mie3
