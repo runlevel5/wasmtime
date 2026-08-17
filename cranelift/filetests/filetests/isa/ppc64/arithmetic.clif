@@ -8,13 +8,32 @@ block0(v0: i64, v1: i64):
 }
 
 ; VCode:
+;   mflr r0
+;   load_addr sp, -16(sp)
+;   std r0, 8(sp)
+;   std fp, 0(sp)
+;   mr fp, sp
 ; block0:
 ;   add r3, r3, r4
+;   ld r0, 8(sp)
+;   mtlr r0
+;   ld fp, 0(sp)
+;   load_addr sp, 16(sp)
 ;   blr
 ;
 ; Disassembled:
 ; block0: ; offset 0x0
+;   mflr r0
+;   addi r1, r1, -0x10
+;   std r0, 8(r1)
+;   std r31, 0(r1)
+;   ori r31, r1, 0
+; block1: ; offset 0x14
 ;   add r3, r3, r4
+;   ld r0, 8(r1)
+;   mtlr r0
+;   ld r31, 0(r1)
+;   addi r1, r1, 0x10
 ;   blr
 
 function %sub_i64(i64, i64) -> i64 {
@@ -24,13 +43,32 @@ block0(v0: i64, v1: i64):
 }
 
 ; VCode:
+;   mflr r0
+;   load_addr sp, -16(sp)
+;   std r0, 8(sp)
+;   std fp, 0(sp)
+;   mr fp, sp
 ; block0:
 ;   sub r3, r3, r4
+;   ld r0, 8(sp)
+;   mtlr r0
+;   ld fp, 0(sp)
+;   load_addr sp, 16(sp)
 ;   blr
 ;
 ; Disassembled:
 ; block0: ; offset 0x0
+;   mflr r0
+;   addi r1, r1, -0x10
+;   std r0, 8(r1)
+;   std r31, 0(r1)
+;   ori r31, r1, 0
+; block1: ; offset 0x14
 ;   subf r3, r4, r3
+;   ld r0, 8(r1)
+;   mtlr r0
+;   ld r31, 0(r1)
+;   addi r1, r1, 0x10
 ;   blr
 
 function %mul_i64(i64, i64) -> i64 {
@@ -40,13 +78,32 @@ block0(v0: i64, v1: i64):
 }
 
 ; VCode:
+;   mflr r0
+;   load_addr sp, -16(sp)
+;   std r0, 8(sp)
+;   std fp, 0(sp)
+;   mr fp, sp
 ; block0:
 ;   mulld r3, r3, r4
+;   ld r0, 8(sp)
+;   mtlr r0
+;   ld fp, 0(sp)
+;   load_addr sp, 16(sp)
 ;   blr
 ;
 ; Disassembled:
 ; block0: ; offset 0x0
+;   mflr r0
+;   addi r1, r1, -0x10
+;   std r0, 8(r1)
+;   std r31, 0(r1)
+;   ori r31, r1, 0
+; block1: ; offset 0x14
 ;   mulld r3, r3, r4
+;   ld r0, 8(r1)
+;   mtlr r0
+;   ld r31, 0(r1)
+;   addi r1, r1, 0x10
 ;   blr
 
 function %logic(i64, i64) -> i64 {
@@ -58,17 +115,36 @@ block0(v0: i64, v1: i64):
 }
 
 ; VCode:
+;   mflr r0
+;   load_addr sp, -16(sp)
+;   std r0, 8(sp)
+;   std fp, 0(sp)
+;   mr fp, sp
 ; block0:
 ;   and r5, r3, r4
 ;   or r5, r5, r4
 ;   xor r3, r5, r3
+;   ld r0, 8(sp)
+;   mtlr r0
+;   ld fp, 0(sp)
+;   load_addr sp, 16(sp)
 ;   blr
 ;
 ; Disassembled:
 ; block0: ; offset 0x0
+;   mflr r0
+;   addi r1, r1, -0x10
+;   std r0, 8(r1)
+;   std r31, 0(r1)
+;   ori r31, r1, 0
+; block1: ; offset 0x14
 ;   and r5, r3, r4
 ;   or r5, r5, r4
 ;   xor r3, r5, r3
+;   ld r0, 8(r1)
+;   mtlr r0
+;   ld r31, 0(r1)
+;   addi r1, r1, 0x10
 ;   blr
 
 function %iconst_various() -> i64 {
@@ -82,15 +158,30 @@ block0:
 }
 
 ; VCode:
+;   mflr r0
+;   load_addr sp, -16(sp)
+;   std r0, 8(sp)
+;   std fp, 0(sp)
+;   mr fp, sp
 ; block0:
 ;   load_const r3, 0x7fff0000
 ;   load_const r4, 0x123456789abcdef0
 ;   addi r3, r3, 42
 ;   add r3, r3, r4
+;   ld r0, 8(sp)
+;   mtlr r0
+;   ld fp, 0(sp)
+;   load_addr sp, 16(sp)
 ;   blr
 ;
 ; Disassembled:
 ; block0: ; offset 0x0
+;   mflr r0
+;   addi r1, r1, -0x10
+;   std r0, 8(r1)
+;   std r31, 0(r1)
+;   ori r31, r1, 0
+; block1: ; offset 0x14
 ;   lis r3, 0x7fff
 ;   lis r4, 0x1234
 ;   ori r4, r4, 0x5678
@@ -99,5 +190,9 @@ block0:
 ;   ori r4, r4, 0xdef0
 ;   addi r3, r3, 0x2a
 ;   add r3, r3, r4
+;   ld r0, 8(r1)
+;   mtlr r0
+;   ld r31, 0(r1)
+;   addi r1, r1, 0x10
 ;   blr
 

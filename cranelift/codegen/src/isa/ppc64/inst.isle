@@ -245,6 +245,29 @@
       (signed bool)
       (ty Type))
 
+    ;; Convert floating point to integer, with the checks CLIF requires:
+    ;; the trapping form traps on NaN and out-of-range inputs, while the
+    ;; saturating form maps NaN to zero and lets the hardware's saturating
+    ;; conversions handle the bounds. `tmp` holds the bound constants.
+    (FpuToInt
+      (rd WritableReg)
+      (tmp WritableReg)
+      (rn Reg)
+      (signed bool)
+      (sat bool)
+      (in_ty Type)
+      (out_ty Type))
+
+    ;; IEEE 754 minimum/maximum with CLIF NaN semantics: NaN if either
+    ;; input is NaN. `xsmindp`/`xsmaxdp` give the correct signed-zero
+    ;; behaviour but the wrong NaN behaviour, so the NaN case is handled
+    ;; with an explicit check.
+    (FpuMinMax
+      (rd WritableReg)
+      (ra Reg)
+      (rb Reg)
+      (is_max bool))
+
     ;; Move a GPR's bits into an FPR (`mtvsrd`), and back (`mfvsrd`).
     (MovToFpr
       (rd WritableReg)
@@ -568,6 +591,19 @@
   (int_to_fpu (mov_to_fpr (gen_extend (put_in_reg val) signed (ty_bits in_ty) 64) $F64)
               signed
               out_ty))
+
+(decl fpu_to_int (Reg bool bool Type Type) Reg)
+(rule (fpu_to_int rn signed sat in_ty out_ty)
+  (let ((dst WritableReg (temp_writable_reg $I64))
+        (tmp WritableReg (temp_writable_reg $F64))
+        (_ Unit (emit (MInst.FpuToInt dst tmp rn signed sat in_ty out_ty))))
+    dst))
+
+(decl fpu_min_max (Reg Reg bool Type) Reg)
+(rule (fpu_min_max ra rb is_max ty)
+  (let ((dst WritableReg (temp_writable_reg ty))
+        (_ Unit (emit (MInst.FpuMinMax dst ra rb is_max))))
+    dst))
 
 (decl mov_from_fpr (Reg) Reg)
 (rule (mov_from_fpr rn)

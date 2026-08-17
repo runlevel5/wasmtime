@@ -1,0 +1,45 @@
+test compile precise-output
+target powerpc64le
+
+; Unsigned overflow occurred iff the sum is less than either operand.
+function %uadd_ovf_trap(i64, i64) -> i64 {
+block0(v0: i64, v1: i64):
+    v2 = uadd_overflow_trap v0, v1, heap_oob
+    return v2
+}
+
+; VCode:
+;   mflr r0
+;   load_addr sp, -16(sp)
+;   std r0, 8(sp)
+;   std fp, 0(sp)
+;   mr fp, sp
+; block0:
+;   mr r5, r3
+;   add r3, r5, r4
+;   trap_if.ult r3, r5 # heap_oob
+;   ld r0, 8(sp)
+;   mtlr r0
+;   ld fp, 0(sp)
+;   load_addr sp, 16(sp)
+;   blr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   mflr r0
+;   addi r1, r1, -0x10
+;   std r0, 8(r1)
+;   std r31, 0(r1)
+;   ori r31, r1, 0
+; block1: ; offset 0x14
+;   ori r5, r3, 0
+;   add r3, r5, r4
+;   cmpld r3, r5
+;   bge 0x28
+;   .byte 0x00, 0x00, 0x00, 0x00 ; trap: heap_oob
+;   ld r0, 8(r1)
+;   mtlr r0
+;   ld r31, 0(r1)
+;   addi r1, r1, 0x10
+;   blr
+

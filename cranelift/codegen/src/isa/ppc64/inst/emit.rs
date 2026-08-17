@@ -632,6 +632,107 @@ impl MachInstEmit for Inst {
                 }
             }
 
+            &Inst::FpuToInt {
+                rd,
+                tmp,
+                rn,
+                signed,
+                sat,
+                in_ty,
+                out_ty,
+            } => {
+                let rd = reg_num(rd.to_reg());
+                let tmp = reg_num(tmp.to_reg());
+                let rn = reg_num(rn);
+                // fctidz / fctiduz / fctiwz / fctiwuz: truncating, and
+                // saturating on out-of-range inputs.
+                let cvt_xo = match (signed, out_ty == I64) {
+                    (true, true) => 815,
+                    (false, true) => 943,
+                    (true, false) => 15,
+                    (false, false) => 143,
+                };
+
+                // NaN check: `fcmpu x, x` is unordered only for NaN.
+                sink.put4(enc_x_opcd(63, 0, rn, rn, 0));
+                if sat {
+                    // Ordered: skip the zero-result path.
+                    sink.put4(enc_bc(bo_for(false), CR0_UN, 12, false));
+                    sink.put4(enc_d(14, rd, 0, 0)); // li rd, 0
+                    sink.put4(enc_b(12, false)); // past the conversion
+                    sink.put4(enc_x_opcd(63, tmp, 0, rn, cvt_xo));
+                    sink.put4(enc_xx1(tmp, rd, 51)); // mfvsrd
+                } else {
+                    // Trap on NaN.
+                    sink.put4(enc_bc(bo_for(false), CR0_UN, 8, false));
+                    Inst::Udf {
+                        trap_code: ir::TrapCode::BAD_CONVERSION_TO_INTEGER,
+                    }
+                    .emit(sink, emit_info, state);
+
+                    // The input must lie strictly between the exclusive
+                    // bounds. An f32 input is held widened to double, so
+                    // its bounds are compared in the double domain too,
+                    // which is exact.
+                    let (lo, hi) = if in_ty == F32 {
+                        let (lo, hi) = wasmtime_core::math::f32_cvt_to_int_bounds(
+                            signed,
+                            out_ty.bits(),
+                        );
+                        (f64::from(lo).to_bits(), f64::from(hi).to_bits())
+                    } else {
+                        let (lo, hi) = wasmtime_core::math::f64_cvt_to_int_bounds(
+                            signed,
+                            out_ty.bits(),
+                        );
+                        (lo.to_bits(), hi.to_bits())
+                    };
+
+                    // Trap unless x > lo.
+                    for w in Inst::load_constant_words(rd, lo) {
+                        sink.put4(w);
+                    }
+                    sink.put4(enc_xx1(tmp, rd, 179)); // mtvsrd tmp, rd
+                    sink.put4(enc_x_opcd(63, 0, rn, tmp, 0)); // fcmpu
+                    sink.put4(enc_bc(bo_for(true), CR0_GT, 8, false));
+                    Inst::Udf {
+                        trap_code: ir::TrapCode::INTEGER_OVERFLOW,
+                    }
+                    .emit(sink, emit_info, state);
+
+                    // Trap unless x < hi.
+                    for w in Inst::load_constant_words(rd, hi) {
+                        sink.put4(w);
+                    }
+                    sink.put4(enc_xx1(tmp, rd, 179));
+                    sink.put4(enc_x_opcd(63, 0, rn, tmp, 0));
+                    sink.put4(enc_bc(bo_for(true), CR0_LT, 8, false));
+                    Inst::Udf {
+                        trap_code: ir::TrapCode::INTEGER_OVERFLOW,
+                    }
+                    .emit(sink, emit_info, state);
+
+                    sink.put4(enc_x_opcd(63, tmp, 0, rn, cvt_xo));
+                    sink.put4(enc_xx1(tmp, rd, 51)); // mfvsrd
+                }
+            }
+
+            &Inst::FpuMinMax { rd, ra, rb, is_max } => {
+                // `xsmindp`/`xsmaxdp` handle signed zeros correctly but
+                // return the numeric operand when the other is NaN, where
+                // CLIF requires NaN; `fadd` on the ordered-check failure
+                // path propagates a quiet NaN instead. `rd` is an early
+                // def, so it cannot alias the inputs the fadd re-reads.
+                let rd = reg_num(rd.to_reg());
+                let ra = reg_num(ra);
+                let rb = reg_num(rb);
+                let xo = if is_max { 160 } else { 168 };
+                sink.put4(enc_x_opcd(63, 0, ra, rb, 0)); // fcmpu cr0, ra, rb
+                sink.put4((60 << 26) | (rd << 21) | (ra << 16) | (rb << 11) | (xo << 3));
+                sink.put4(enc_bc(bo_for(false), CR0_UN, 8, false)); // ordered: skip
+                sink.put4(enc_a(63, rd, ra, rb, 0, 21)); // fadd rd, ra, rb
+            }
+
             &Inst::MovToFpr { rd, rn } => {
                 sink.put4(enc_xx1(reg_num(rd.to_reg()), reg_num(rn), 179));
             }

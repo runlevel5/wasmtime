@@ -214,6 +214,51 @@
                           (gen_extend (put_in_reg y) false (ty_bits ty) 64)
                           $I32)))
 
+;;;; Rules for integer `smin`/`smax`/`umin`/`umax` ;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;; A compare feeding `isel`. The comparison inputs are extended when
+;; narrower than a word; the selected values keep their original
+;; registers, whose low bits are the payload either way.
+(rule (lower (smin (fits_in_64 (ty_int ty)) x y))
+  (output_reg (gen_select (int_compare (IntCC.SignedLessThan)
+                                       (put_in_cmp_reg x (IntCC.SignedLessThan) ty)
+                                       (put_in_cmp_reg y (IntCC.SignedLessThan) ty)
+                                       ty)
+                          (put_in_reg x) (put_in_reg y))))
+
+(rule (lower (smax (fits_in_64 (ty_int ty)) x y))
+  (output_reg (gen_select (int_compare (IntCC.SignedGreaterThan)
+                                       (put_in_cmp_reg x (IntCC.SignedGreaterThan) ty)
+                                       (put_in_cmp_reg y (IntCC.SignedGreaterThan) ty)
+                                       ty)
+                          (put_in_reg x) (put_in_reg y))))
+
+(rule (lower (umin (fits_in_64 (ty_int ty)) x y))
+  (output_reg (gen_select (int_compare (IntCC.UnsignedLessThan)
+                                       (put_in_cmp_reg x (IntCC.UnsignedLessThan) ty)
+                                       (put_in_cmp_reg y (IntCC.UnsignedLessThan) ty)
+                                       ty)
+                          (put_in_reg x) (put_in_reg y))))
+
+(rule (lower (umax (fits_in_64 (ty_int ty)) x y))
+  (output_reg (gen_select (int_compare (IntCC.UnsignedGreaterThan)
+                                       (put_in_cmp_reg x (IntCC.UnsignedGreaterThan) ty)
+                                       (put_in_cmp_reg y (IntCC.UnsignedGreaterThan) ty)
+                                       ty)
+                          (put_in_reg x) (put_in_reg y))))
+
+;;;; Rules for `uadd_overflow_trap` ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;; Unsigned overflow occurred iff the sum is less than either operand.
+;; The comparison width matches the type, so upper-bit garbage in narrow
+;; inputs cannot affect the verdict.
+(rule (lower (uadd_overflow_trap (ty_32_or_64 ty) x y tc))
+  (let ((xr Reg (put_in_reg x))
+        (sum Reg (ppc_add xr (put_in_reg y)))
+        (_ Unit (emit_side_effect
+                  (gen_trapif (int_compare (IntCC.UnsignedLessThan) sum xr ty) tc))))
+    (output_reg sum)))
+
 ;;;; Rules for `select` ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ;; Fuse an `icmp` condition into the select's compare.
@@ -301,6 +346,30 @@
 
 (rule 0 (lower (fcvt_from_uint (ty_scalar_float out_ty) x @ (value_type (fits_in_32 in_ty))))
   (output_reg (gen_int_to_fpu x in_ty false out_ty)))
+
+;;;; Rules for `fmin` / `fmax` ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;; Both types operate in the double domain: the minimum of two exactly
+;; representable singles is one of them, so no re-rounding is needed.
+(rule (lower (fmin (ty_scalar_float ty) x y))
+  (output_reg (fpu_min_max (put_in_reg x) (put_in_reg y) false ty)))
+
+(rule (lower (fmax (ty_scalar_float ty) x y))
+  (output_reg (fpu_min_max (put_in_reg x) (put_in_reg y) true ty)))
+
+;;;; Rules for float-to-integer conversions ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(rule (lower (fcvt_to_sint (ty_32_or_64 out_ty) x @ (value_type (ty_scalar_float in_ty))))
+  (output_reg (fpu_to_int (put_in_reg x) true false in_ty out_ty)))
+
+(rule (lower (fcvt_to_uint (ty_32_or_64 out_ty) x @ (value_type (ty_scalar_float in_ty))))
+  (output_reg (fpu_to_int (put_in_reg x) false false in_ty out_ty)))
+
+(rule (lower (fcvt_to_sint_sat (ty_32_or_64 out_ty) x @ (value_type (ty_scalar_float in_ty))))
+  (output_reg (fpu_to_int (put_in_reg x) true true in_ty out_ty)))
+
+(rule (lower (fcvt_to_uint_sat (ty_32_or_64 out_ty) x @ (value_type (ty_scalar_float in_ty))))
+  (output_reg (fpu_to_int (put_in_reg x) false true in_ty out_ty)))
 
 ;;;; Rules for `fcmp` ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 

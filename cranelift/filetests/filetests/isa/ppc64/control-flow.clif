@@ -12,22 +12,49 @@ block2:
 }
 
 ; VCode:
+;   mflr r0
+;   load_addr sp, -16(sp)
+;   std r0, 8(sp)
+;   std fp, 0(sp)
+;   mr fp, sp
 ; block0:
 ;   bslt.d r3, r4 # MachLabel(2), MachLabel(1)
 ; block1:
 ;   mr r3, r4
+;   ld r0, 8(sp)
+;   mtlr r0
+;   ld fp, 0(sp)
+;   load_addr sp, 16(sp)
 ;   blr
 ; block2:
+;   ld r0, 8(sp)
+;   mtlr r0
+;   ld fp, 0(sp)
+;   load_addr sp, 16(sp)
 ;   blr
 ;
 ; Disassembled:
 ; block0: ; offset 0x0
+;   mflr r0
+;   addi r1, r1, -0x10
+;   std r0, 8(r1)
+;   std r31, 0(r1)
+;   ori r31, r1, 0
+; block1: ; offset 0x14
 ;   cmpd r3, r4
-;   blt 0x10
-; block1: ; offset 0x8
+;   blt 0x34
+; block2: ; offset 0x1c
 ;   ori r3, r4, 0
+;   ld r0, 8(r1)
+;   mtlr r0
+;   ld r31, 0(r1)
+;   addi r1, r1, 0x10
 ;   blr
-; block2: ; offset 0x10
+; block3: ; offset 0x34
+;   ld r0, 8(r1)
+;   mtlr r0
+;   ld r31, 0(r1)
+;   addi r1, r1, 0x10
 ;   blr
 
 function %icmp_value(i32, i32) -> i8 {
@@ -37,16 +64,35 @@ block0(v0: i32, v1: i32):
 }
 
 ; VCode:
+;   mflr r0
+;   load_addr sp, -16(sp)
+;   std r0, 8(sp)
+;   std fp, 0(sp)
+;   mr fp, sp
 ; block0:
 ;   cmp_set.ult r3, r3, r4
+;   ld r0, 8(sp)
+;   mtlr r0
+;   ld fp, 0(sp)
+;   load_addr sp, 16(sp)
 ;   blr
 ;
 ; Disassembled:
 ; block0: ; offset 0x0
+;   mflr r0
+;   addi r1, r1, -0x10
+;   std r0, 8(r1)
+;   std r31, 0(r1)
+;   ori r31, r1, 0
+; block1: ; offset 0x14
 ;   cmplw r3, r4
 ;   li r3, 1
 ;   li r0, 0
 ;   isel r3, r3, r0, cr0lt
+;   ld r0, 8(r1)
+;   mtlr r0
+;   ld r31, 0(r1)
+;   addi r1, r1, 0x10
 ;   blr
 
 function %trap_cond(i64) {
@@ -61,21 +107,40 @@ block2:
 }
 
 ; VCode:
+;   mflr r0
+;   load_addr sp, -16(sp)
+;   std r0, 8(sp)
+;   std fp, 0(sp)
+;   mr fp, sp
 ; block0:
 ;   load_const r4, 0x0
 ;   beq.d r3, r4 # MachLabel(2), MachLabel(1)
 ; block1:
+;   ld r0, 8(sp)
+;   mtlr r0
+;   ld fp, 0(sp)
+;   load_addr sp, 16(sp)
 ;   blr
 ; block2:
 ;   trap # user1
 ;
 ; Disassembled:
 ; block0: ; offset 0x0
+;   mflr r0
+;   addi r1, r1, -0x10
+;   std r0, 8(r1)
+;   std r31, 0(r1)
+;   ori r31, r1, 0
+; block1: ; offset 0x14
 ;   li r4, 0
 ;   cmpld r3, r4
-;   beq 0x10
-; block1: ; offset 0xc
+;   beq 0x34
+; block2: ; offset 0x20
+;   ld r0, 8(r1)
+;   mtlr r0
+;   ld r31, 0(r1)
+;   addi r1, r1, 0x10
 ;   blr
-; block2: ; offset 0x10
+; block3: ; offset 0x34
 ;   .byte 0x00, 0x00, 0x00, 0x00 ; trap: user1
 

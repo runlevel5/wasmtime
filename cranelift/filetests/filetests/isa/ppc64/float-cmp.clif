@@ -14,16 +14,35 @@ block0(v0: f64, v1: f64):
 }
 
 ; VCode:
+;   mflr r0
+;   load_addr sp, -16(sp)
+;   std r0, 8(sp)
+;   std fp, 0(sp)
+;   mr fp, sp
 ; block0:
 ;   fcmp_set.lt r3, f1, f2
+;   ld r0, 8(sp)
+;   mtlr r0
+;   ld fp, 0(sp)
+;   load_addr sp, 16(sp)
 ;   blr
 ;
 ; Disassembled:
 ; block0: ; offset 0x0
+;   mflr r0
+;   addi r1, r1, -0x10
+;   std r0, 8(r1)
+;   std r31, 0(r1)
+;   ori r31, r1, 0
+; block1: ; offset 0x14
 ;   fcmpu cr0, f1, f2
 ;   li r3, 1
 ;   li r0, 0
 ;   isel r3, r3, r0, cr0lt
+;   ld r0, 8(r1)
+;   mtlr r0
+;   ld r31, 0(r1)
+;   addi r1, r1, 0x10
 ;   blr
 
 function %le(f64, f64) -> i8 {
@@ -33,17 +52,36 @@ block0(v0: f64, v1: f64):
 }
 
 ; VCode:
+;   mflr r0
+;   load_addr sp, -16(sp)
+;   std r0, 8(sp)
+;   std fp, 0(sp)
+;   mr fp, sp
 ; block0:
 ;   fcmp_set.le r3, f1, f2
+;   ld r0, 8(sp)
+;   mtlr r0
+;   ld fp, 0(sp)
+;   load_addr sp, 16(sp)
 ;   blr
 ;
 ; Disassembled:
 ; block0: ; offset 0x0
+;   mflr r0
+;   addi r1, r1, -0x10
+;   std r0, 8(r1)
+;   std r31, 0(r1)
+;   ori r31, r1, 0
+; block1: ; offset 0x14
 ;   fcmpu cr0, f1, f2
 ;   cror cr0eq, cr0lt, cr0eq
 ;   li r3, 1
 ;   li r0, 0
 ;   isel r3, r3, r0, cr0eq
+;   ld r0, 8(r1)
+;   mtlr r0
+;   ld r31, 0(r1)
+;   addi r1, r1, 0x10
 ;   blr
 
 function %one(f64, f64) -> i8 {
@@ -53,17 +91,36 @@ block0(v0: f64, v1: f64):
 }
 
 ; VCode:
+;   mflr r0
+;   load_addr sp, -16(sp)
+;   std r0, 8(sp)
+;   std fp, 0(sp)
+;   mr fp, sp
 ; block0:
 ;   fcmp_set.one r3, f1, f2
+;   ld r0, 8(sp)
+;   mtlr r0
+;   ld fp, 0(sp)
+;   load_addr sp, 16(sp)
 ;   blr
 ;
 ; Disassembled:
 ; block0: ; offset 0x0
+;   mflr r0
+;   addi r1, r1, -0x10
+;   std r0, 8(r1)
+;   std r31, 0(r1)
+;   ori r31, r1, 0
+; block1: ; offset 0x14
 ;   fcmpu cr0, f1, f2
 ;   cror cr0lt, cr0lt, cr0gt
 ;   li r3, 1
 ;   li r0, 0
 ;   isel r3, r3, r0, cr0lt
+;   ld r0, 8(r1)
+;   mtlr r0
+;   ld r31, 0(r1)
+;   addi r1, r1, 0x10
 ;   blr
 
 function %ord(f64, f64) -> i8 {
@@ -73,15 +130,34 @@ block0(v0: f64, v1: f64):
 }
 
 ; VCode:
+;   mflr r0
+;   load_addr sp, -16(sp)
+;   std r0, 8(sp)
+;   std fp, 0(sp)
+;   mr fp, sp
 ; block0:
 ;   fcmp_set.ord r3, f1, f2
+;   ld r0, 8(sp)
+;   mtlr r0
+;   ld fp, 0(sp)
+;   load_addr sp, 16(sp)
 ;   blr
 ;
 ; Disassembled:
 ; block0: ; offset 0x0
+;   mflr r0
+;   addi r1, r1, -0x10
+;   std r0, 8(r1)
+;   std r31, 0(r1)
+;   ori r31, r1, 0
+; block1: ; offset 0x14
 ;   fcmpu cr0, f1, f2
 ;   li r3, 1
 ;   isel r3, 0, r3, cr0un
+;   ld r0, 8(r1)
+;   mtlr r0
+;   ld r31, 0(r1)
+;   addi r1, r1, 0x10
 ;   blr
 
 function %ne(f64, f64) -> i8 {
@@ -91,15 +167,34 @@ block0(v0: f64, v1: f64):
 }
 
 ; VCode:
+;   mflr r0
+;   load_addr sp, -16(sp)
+;   std r0, 8(sp)
+;   std fp, 0(sp)
+;   mr fp, sp
 ; block0:
 ;   fcmp_set.ne r3, f1, f2
+;   ld r0, 8(sp)
+;   mtlr r0
+;   ld fp, 0(sp)
+;   load_addr sp, 16(sp)
 ;   blr
 ;
 ; Disassembled:
 ; block0: ; offset 0x0
+;   mflr r0
+;   addi r1, r1, -0x10
+;   std r0, 8(r1)
+;   std r31, 0(r1)
+;   ori r31, r1, 0
+; block1: ; offset 0x14
 ;   fcmpu cr0, f1, f2
 ;   li r3, 1
 ;   isel r3, 0, r3, cr0eq
+;   ld r0, 8(r1)
+;   mtlr r0
+;   ld r31, 0(r1)
+;   addi r1, r1, 0x10
 ;   blr
 
 function %ule(f64, f64) -> i8 {
@@ -109,15 +204,34 @@ block0(v0: f64, v1: f64):
 }
 
 ; VCode:
+;   mflr r0
+;   load_addr sp, -16(sp)
+;   std r0, 8(sp)
+;   std fp, 0(sp)
+;   mr fp, sp
 ; block0:
 ;   fcmp_set.ule r3, f1, f2
+;   ld r0, 8(sp)
+;   mtlr r0
+;   ld fp, 0(sp)
+;   load_addr sp, 16(sp)
 ;   blr
 ;
 ; Disassembled:
 ; block0: ; offset 0x0
+;   mflr r0
+;   addi r1, r1, -0x10
+;   std r0, 8(r1)
+;   std r31, 0(r1)
+;   ori r31, r1, 0
+; block1: ; offset 0x14
 ;   fcmpu cr0, f1, f2
 ;   li r3, 1
 ;   isel r3, 0, r3, cr0gt
+;   ld r0, 8(r1)
+;   mtlr r0
+;   ld r31, 0(r1)
+;   addi r1, r1, 0x10
 ;   blr
 
 function %br_uno(f64, f64) -> i64 {
@@ -133,24 +247,51 @@ block2:
 }
 
 ; VCode:
+;   mflr r0
+;   load_addr sp, -16(sp)
+;   std r0, 8(sp)
+;   std fp, 0(sp)
+;   mr fp, sp
 ; block0:
 ;   fbr.uno f1, f2 # MachLabel(2), MachLabel(1)
 ; block1:
 ;   load_const r3, 0x2
+;   ld r0, 8(sp)
+;   mtlr r0
+;   ld fp, 0(sp)
+;   load_addr sp, 16(sp)
 ;   blr
 ; block2:
 ;   load_const r3, 0x1
+;   ld r0, 8(sp)
+;   mtlr r0
+;   ld fp, 0(sp)
+;   load_addr sp, 16(sp)
 ;   blr
 ;
 ; Disassembled:
 ; block0: ; offset 0x0
+;   mflr r0
+;   addi r1, r1, -0x10
+;   std r0, 8(r1)
+;   std r31, 0(r1)
+;   ori r31, r1, 0
+; block1: ; offset 0x14
 ;   fcmpu cr0, f1, f2
-;   bso 0x10
-; block1: ; offset 0x8
+;   bso 0x34
+; block2: ; offset 0x1c
 ;   li r3, 2
+;   ld r0, 8(r1)
+;   mtlr r0
+;   ld r31, 0(r1)
+;   addi r1, r1, 0x10
 ;   blr
-; block2: ; offset 0x10
+; block3: ; offset 0x34
 ;   li r3, 1
+;   ld r0, 8(r1)
+;   mtlr r0
+;   ld r31, 0(r1)
+;   addi r1, r1, 0x10
 ;   blr
 
 function %br_ge(f64, f64) -> i64 {
@@ -166,24 +307,51 @@ block2:
 }
 
 ; VCode:
+;   mflr r0
+;   load_addr sp, -16(sp)
+;   std r0, 8(sp)
+;   std fp, 0(sp)
+;   mr fp, sp
 ; block0:
 ;   fbr.ge f1, f2 # MachLabel(2), MachLabel(1)
 ; block1:
 ;   load_const r3, 0x2
+;   ld r0, 8(sp)
+;   mtlr r0
+;   ld fp, 0(sp)
+;   load_addr sp, 16(sp)
 ;   blr
 ; block2:
 ;   load_const r3, 0x1
+;   ld r0, 8(sp)
+;   mtlr r0
+;   ld fp, 0(sp)
+;   load_addr sp, 16(sp)
 ;   blr
 ;
 ; Disassembled:
 ; block0: ; offset 0x0
+;   mflr r0
+;   addi r1, r1, -0x10
+;   std r0, 8(r1)
+;   std r31, 0(r1)
+;   ori r31, r1, 0
+; block1: ; offset 0x14
 ;   fcmpu cr0, f1, f2
 ;   cror cr0eq, cr0gt, cr0eq
-;   beq 0x14
-; block1: ; offset 0xc
+;   beq 0x38
+; block2: ; offset 0x20
 ;   li r3, 2
+;   ld r0, 8(r1)
+;   mtlr r0
+;   ld r31, 0(r1)
+;   addi r1, r1, 0x10
 ;   blr
-; block2: ; offset 0x14
+; block3: ; offset 0x38
 ;   li r3, 1
+;   ld r0, 8(r1)
+;   mtlr r0
+;   ld r31, 0(r1)
+;   addi r1, r1, 0x10
 ;   blr
 

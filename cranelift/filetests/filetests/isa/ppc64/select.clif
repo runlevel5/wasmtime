@@ -9,14 +9,33 @@ block0(v0: i64, v1: i64, v2: i64):
 }
 
 ; VCode:
+;   mflr r0
+;   load_addr sp, -16(sp)
+;   std r0, 8(sp)
+;   std fp, 0(sp)
+;   mr fp, sp
 ; block0:
 ;   select.slt r3, r4, r5 # cmp r3, r4
+;   ld r0, 8(sp)
+;   mtlr r0
+;   ld fp, 0(sp)
+;   load_addr sp, 16(sp)
 ;   blr
 ;
 ; Disassembled:
 ; block0: ; offset 0x0
+;   mflr r0
+;   addi r1, r1, -0x10
+;   std r0, 8(r1)
+;   std r31, 0(r1)
+;   ori r31, r1, 0
+; block1: ; offset 0x14
 ;   cmpd r3, r4
 ;   isel r3, r4, r5, cr0lt
+;   ld r0, 8(r1)
+;   mtlr r0
+;   ld r31, 0(r1)
+;   addi r1, r1, 0x10
 ;   blr
 
 function %select_nonzero(i64, i64, i64) -> i64 {
@@ -26,16 +45,35 @@ block0(v0: i64, v1: i64, v2: i64):
 }
 
 ; VCode:
+;   mflr r0
+;   load_addr sp, -16(sp)
+;   std r0, 8(sp)
+;   std fp, 0(sp)
+;   mr fp, sp
 ; block0:
 ;   load_const r6, 0x0
 ;   select.ne r3, r4, r5 # cmp r3, r6
+;   ld r0, 8(sp)
+;   mtlr r0
+;   ld fp, 0(sp)
+;   load_addr sp, 16(sp)
 ;   blr
 ;
 ; Disassembled:
 ; block0: ; offset 0x0
+;   mflr r0
+;   addi r1, r1, -0x10
+;   std r0, 8(r1)
+;   std r31, 0(r1)
+;   ori r31, r1, 0
+; block1: ; offset 0x14
 ;   li r6, 0
 ;   cmpld r3, r6
 ;   isel r3, r5, r4, cr0eq
+;   ld r0, 8(r1)
+;   mtlr r0
+;   ld r31, 0(r1)
+;   addi r1, r1, 0x10
 ;   blr
 
 function %trapz_trapnz(i64) {
@@ -46,23 +84,42 @@ block0(v0: i64):
 }
 
 ; VCode:
+;   mflr r0
+;   load_addr sp, -16(sp)
+;   std r0, 8(sp)
+;   std fp, 0(sp)
+;   mr fp, sp
 ; block0:
 ;   load_const r4, 0x0
 ;   trap_if.eq r3, r4 # user1
 ;   load_const r4, 0x0
 ;   trap_if.ne r3, r4 # user2
+;   ld r0, 8(sp)
+;   mtlr r0
+;   ld fp, 0(sp)
+;   load_addr sp, 16(sp)
 ;   blr
 ;
 ; Disassembled:
 ; block0: ; offset 0x0
+;   mflr r0
+;   addi r1, r1, -0x10
+;   std r0, 8(r1)
+;   std r31, 0(r1)
+;   ori r31, r1, 0
+; block1: ; offset 0x14
 ;   li r4, 0
 ;   cmpld r3, r4
-;   bne 0x10
+;   bne 0x24
 ;   .byte 0x00, 0x00, 0x00, 0x00 ; trap: user1
 ;   li r4, 0
 ;   cmpld r3, r4
-;   beq 0x20
+;   beq 0x34
 ;   .byte 0x00, 0x00, 0x00, 0x00 ; trap: user2
+;   ld r0, 8(r1)
+;   mtlr r0
+;   ld r31, 0(r1)
+;   addi r1, r1, 0x10
 ;   blr
 
 function %iadd_imm(i64) -> i64 {
@@ -73,12 +130,31 @@ block0(v0: i64):
 }
 
 ; VCode:
+;   mflr r0
+;   load_addr sp, -16(sp)
+;   std r0, 8(sp)
+;   std fp, 0(sp)
+;   mr fp, sp
 ; block0:
 ;   addi r3, r3, 100
+;   ld r0, 8(sp)
+;   mtlr r0
+;   ld fp, 0(sp)
+;   load_addr sp, 16(sp)
 ;   blr
 ;
 ; Disassembled:
 ; block0: ; offset 0x0
+;   mflr r0
+;   addi r1, r1, -0x10
+;   std r0, 8(r1)
+;   std r31, 0(r1)
+;   ori r31, r1, 0
+; block1: ; offset 0x14
 ;   addi r3, r3, 0x64
+;   ld r0, 8(r1)
+;   mtlr r0
+;   ld r31, 0(r1)
+;   addi r1, r1, 0x10
 ;   blr
 

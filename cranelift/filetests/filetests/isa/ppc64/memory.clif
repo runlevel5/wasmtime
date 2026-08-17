@@ -12,6 +12,11 @@ block0(v0: i64):
 }
 
 ; VCode:
+;   mflr r0
+;   load_addr sp, -16(sp)
+;   std r0, 8(sp)
+;   std fp, 0(sp)
+;   mr fp, sp
 ; block0:
 ;   ld r5, 0(r3)
 ;   lwz r6, 8(r3)
@@ -19,16 +24,30 @@ block0(v0: i64):
 ;   zext.32->64 r6, r6
 ;   add r3, r5, r6
 ;   std r3, 16(r10)
+;   ld r0, 8(sp)
+;   mtlr r0
+;   ld fp, 0(sp)
+;   load_addr sp, 16(sp)
 ;   blr
 ;
 ; Disassembled:
 ; block0: ; offset 0x0
+;   mflr r0
+;   addi r1, r1, -0x10
+;   std r0, 8(r1)
+;   std r31, 0(r1)
+;   ori r31, r1, 0
+; block1: ; offset 0x14
 ;   ld r5, 0(r3) ; trap: heap_oob
 ;   lwz r6, 8(r3) ; trap: heap_oob
 ;   ori r10, r3, 0
 ;   clrldi r6, r6, 0x20
 ;   add r3, r5, r6
 ;   std r3, 0x10(r10) ; trap: heap_oob
+;   ld r0, 8(r1)
+;   mtlr r0
+;   ld r31, 0(r1)
+;   addi r1, r1, 0x10
 ;   blr
 
 function %big_offset(i64) -> i64 {
@@ -38,15 +57,34 @@ block0(v0: i64):
 }
 
 ; VCode:
+;   mflr r0
+;   load_addr sp, -16(sp)
+;   std r0, 8(sp)
+;   std fp, 0(sp)
+;   mr fp, sp
 ; block0:
 ;   ld r3, 74565(r3)
+;   ld r0, 8(sp)
+;   mtlr r0
+;   ld fp, 0(sp)
+;   load_addr sp, 16(sp)
 ;   blr
 ;
 ; Disassembled:
 ; block0: ; offset 0x0
+;   mflr r0
+;   addi r1, r1, -0x10
+;   std r0, 8(r1)
+;   std r31, 0(r1)
+;   ori r31, r1, 0
+; block1: ; offset 0x14
 ;   lis r0, 1 ; trap: heap_oob
 ;   ori r0, r0, 0x2345
 ;   ldx r3, r3, r0
+;   ld r0, 8(r1)
+;   mtlr r0
+;   ld r31, 0(r1)
+;   addi r1, r1, 0x10
 ;   blr
 
 function %narrow(i64) -> i64 {
@@ -59,6 +97,11 @@ block0(v0: i64):
 }
 
 ; VCode:
+;   mflr r0
+;   load_addr sp, -16(sp)
+;   std r0, 8(sp)
+;   std fp, 0(sp)
+;   mr fp, sp
 ; block0:
 ;   lbz r4, 0(r3)
 ;   sext.8->64 r6, r4
@@ -66,15 +109,29 @@ block0(v0: i64):
 ;   mr r10, r3
 ;   add r3, r6, r5
 ;   stb r3, 8(r10)
+;   ld r0, 8(sp)
+;   mtlr r0
+;   ld fp, 0(sp)
+;   load_addr sp, 16(sp)
 ;   blr
 ;
 ; Disassembled:
 ; block0: ; offset 0x0
+;   mflr r0
+;   addi r1, r1, -0x10
+;   std r0, 8(r1)
+;   std r31, 0(r1)
+;   ori r31, r1, 0
+; block1: ; offset 0x14
 ;   lbz r4, 0(r3) ; trap: heap_oob
 ;   extsb r6, r4
 ;   lhz r5, 2(r3) ; trap: heap_oob
 ;   ori r10, r3, 0
 ;   add r3, r6, r5
 ;   stb r3, 8(r10) ; trap: heap_oob
+;   ld r0, 8(r1)
+;   mtlr r0
+;   ld r31, 0(r1)
+;   addi r1, r1, 0x10
 ;   blr
 

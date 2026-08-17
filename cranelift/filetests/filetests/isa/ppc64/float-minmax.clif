@@ -1,11 +1,12 @@
 test compile precise-output
-target powerpc64le power9
+target powerpc64le
 
-; ISA 3.0 supplies `modsd`/`modud`, replacing the divide-multiply-subtract
-; sequence used on POWER8.
-function %srem_i64(i64, i64) -> i64 {
-block0(v0: i64, v1: i64):
-    v2 = srem v0, v1
+; xsmindp/xsmaxdp give the right signed-zero behaviour but return the
+; numeric operand when the other is NaN, where CLIF wants NaN, so the
+; unordered case falls through to an fadd that propagates a quiet NaN.
+function %min_f64(f64, f64) -> f64 {
+block0(v0: f64, v1: f64):
+    v2 = fmin v0, v1
     return v2
 }
 
@@ -16,8 +17,8 @@ block0(v0: i64, v1: i64):
 ;   std fp, 0(sp)
 ;   mr fp, sp
 ; block0:
-;   mr r5, r3
-;   srem.i64 r3, r5, r4
+;   mr f4, f1
+;   fmin f1, f4, f2
 ;   ld r0, 8(sp)
 ;   mtlr r0
 ;   ld fp, 0(sp)
@@ -32,24 +33,20 @@ block0(v0: i64, v1: i64):
 ;   std r31, 0(r1)
 ;   ori r31, r1, 0
 ; block1: ; offset 0x14
-;   ori r5, r3, 0
-;   cmpdi r4, 0
-;   bne 0x24
-;   .byte 0x00, 0x00, 0x00, 0x00 ; trap: int_divz
-;   cmpdi r4, -1
-;   bne 0x34
-;   li r3, 0
-;   b 0x38
-;   modsd r3, r5, r4
+;   fmr f4, f1
+;   fcmpu cr0, f4, f2
+;   xsmindp f1, f4, f2
+;   bns 0x28
+;   fadd f1, f4, f2
 ;   ld r0, 8(r1)
 ;   mtlr r0
 ;   ld r31, 0(r1)
 ;   addi r1, r1, 0x10
 ;   blr
 
-function %urem_i64(i64, i64) -> i64 {
-block0(v0: i64, v1: i64):
-    v2 = urem v0, v1
+function %max_f32(f32, f32) -> f32 {
+block0(v0: f32, v1: f32):
+    v2 = fmax v0, v1
     return v2
 }
 
@@ -60,8 +57,8 @@ block0(v0: i64, v1: i64):
 ;   std fp, 0(sp)
 ;   mr fp, sp
 ; block0:
-;   mr r5, r3
-;   urem.i64 r3, r5, r4
+;   mr f4, f1
+;   fmax f1, f4, f2
 ;   ld r0, 8(sp)
 ;   mtlr r0
 ;   ld fp, 0(sp)
@@ -76,11 +73,11 @@ block0(v0: i64, v1: i64):
 ;   std r31, 0(r1)
 ;   ori r31, r1, 0
 ; block1: ; offset 0x14
-;   ori r5, r3, 0
-;   cmpdi r4, 0
-;   bne 0x24
-;   .byte 0x00, 0x00, 0x00, 0x00 ; trap: int_divz
-;   modud r3, r5, r4
+;   fmr f4, f1
+;   fcmpu cr0, f4, f2
+;   xsmaxdp f1, f4, f2
+;   bns 0x28
+;   fadd f1, f4, f2
 ;   ld r0, 8(r1)
 ;   mtlr r0
 ;   ld r31, 0(r1)

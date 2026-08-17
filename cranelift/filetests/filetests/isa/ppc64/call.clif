@@ -14,8 +14,10 @@ block0(v0: i64):
 ;   std r0, 8(sp)
 ;   std fp, 0(sp)
 ;   mr fp, sp
+;   load_addr sp, -32(sp)
 ; block0:
 ;   bl TestCase(%callee)
+;   load_addr sp, 32(sp)
 ;   ld r0, 8(sp)
 ;   mtlr r0
 ;   ld fp, 0(sp)
@@ -29,8 +31,10 @@ block0(v0: i64):
 ;   std r0, 8(r1)
 ;   std r31, 0(r1)
 ;   ori r31, r1, 0
-; block1: ; offset 0x14
-;   bl 0x14 ; reloc_external Call %callee 0
+;   addi r1, r1, -0x20
+; block1: ; offset 0x18
+;   bl 0x18 ; reloc_external Call %callee 0
+;   addi r1, r1, 0x20
 ;   ld r0, 8(r1)
 ;   mtlr r0
 ;   ld r31, 0(r1)
@@ -50,9 +54,11 @@ block0(v0: i64, v1: i64):
 ;   std r0, 8(sp)
 ;   std fp, 0(sp)
 ;   mr fp, sp
+;   load_addr sp, -32(sp)
 ; block0:
 ;   mr r12, r4
 ;   mtctr r12; bctrl
+;   load_addr sp, 32(sp)
 ;   ld r0, 8(sp)
 ;   mtlr r0
 ;   ld fp, 0(sp)
@@ -66,16 +72,17 @@ block0(v0: i64, v1: i64):
 ;   std r0, 8(r1)
 ;   std r31, 0(r1)
 ;   ori r31, r1, 0
-; block1: ; offset 0x14
+;   addi r1, r1, -0x20
+; block1: ; offset 0x18
 ;   ori r12, r4, 0
 ;   mtctr r12
 ;   bctrl
+;   addi r1, r1, 0x20
 ;   ld r0, 8(r1)
 ;   mtlr r0
 ;   ld r31, 0(r1)
 ;   addi r1, r1, 0x10
 ;   blr
-
 
 function %try_call_direct(i64) -> i64 tail {
     sig0 = (i64) -> i64 tail

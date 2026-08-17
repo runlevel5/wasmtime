@@ -89,6 +89,17 @@ fn ppc64_get_operands(inst: &mut Inst, collector: &mut impl OperandVisitor) {
             collector.reg_use(rb);
             collector.reg_def(rd);
         }
+        Inst::FpuToInt { rd, tmp, rn, .. } => {
+            collector.reg_use(rn);
+            collector.reg_early_def(rd);
+            collector.reg_early_def(tmp);
+        }
+        Inst::FpuMinMax { rd, ra, rb, .. } => {
+            collector.reg_use(ra);
+            collector.reg_use(rb);
+            // The NaN path re-reads the inputs after rd is written.
+            collector.reg_early_def(rd);
+        }
         Inst::FpuCmpSet { rd, kind } => {
             collector.reg_use(&mut kind.rs1);
             collector.reg_use(&mut kind.rs2);
@@ -366,12 +377,11 @@ impl MachInst for Inst {
     }
 
     fn worst_case_size() -> CodeOffset {
-        // The largest expansion is a signed division: the divide-by-zero
-        // check, the -1 divisor path with its INT_MIN comparison and
-        // overflow trap, and the divide itself come to 13 instructions.
-        // Trailing-zero emulation without ISA 3.0 is 6, LoadExtName is 4
-        // plus an 8-byte literal. Leave headroom above all of them.
-        80
+        // The largest expansion is a trapping float-to-integer
+        // conversion: a NaN check and two bound checks, each of which
+        // materializes a 64-bit constant (up to five instructions), come
+        // to 22 instructions. Leave headroom above that.
+        96
     }
 
     fn worst_case_island_growth() -> CodeOffset {
@@ -541,6 +551,29 @@ impl Inst {
                 let mnemonic = if *signed { "fcfid" } else { "fcfidu" };
                 format!("{mnemonic}.{ty} {}, {}", wreg(*rd), reg(*rn))
             }
+            Inst::FpuToInt {
+                rd,
+                rn,
+                signed,
+                sat,
+                out_ty,
+                ..
+            } => {
+                let mnemonic = match (signed, sat) {
+                    (true, false) => "fcvt_to_sint",
+                    (false, false) => "fcvt_to_uint",
+                    (true, true) => "fcvt_to_sint_sat",
+                    (false, true) => "fcvt_to_uint_sat",
+                };
+                format!("{mnemonic}.{out_ty} {}, {}", wreg(*rd), reg(*rn))
+            }
+            Inst::FpuMinMax { rd, ra, rb, is_max } => format!(
+                "{} {}, {}, {}",
+                if *is_max { "fmax" } else { "fmin" },
+                wreg(*rd),
+                reg(*ra),
+                reg(*rb)
+            ),
             Inst::MovToFpr { rd, rn } => format!("mtvsrd {}, {}", wreg(*rd), reg(*rn)),
             Inst::MovFromFpr { rd, rn } => format!("mfvsrd {}, {}", wreg(*rd), reg(*rn)),
             Inst::Extend {

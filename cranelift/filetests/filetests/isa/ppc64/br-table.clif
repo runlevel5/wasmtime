@@ -23,47 +23,90 @@ block4:
 }
 
 ; VCode:
+;   mflr r0
+;   load_addr sp, -16(sp)
+;   std r0, 8(sp)
+;   std fp, 0(sp)
+;   mr fp, sp
 ; block0:
 ;   br_table r3 # 3 targets
 ; block1:
 ;   load_const r3, 0x3
+;   ld r0, 8(sp)
+;   mtlr r0
+;   ld fp, 0(sp)
+;   load_addr sp, 16(sp)
 ;   blr
 ; block2:
 ;   load_const r3, 0x2
+;   ld r0, 8(sp)
+;   mtlr r0
+;   ld fp, 0(sp)
+;   load_addr sp, 16(sp)
 ;   blr
 ; block3:
 ;   load_const r3, 0x1
+;   ld r0, 8(sp)
+;   mtlr r0
+;   ld fp, 0(sp)
+;   load_addr sp, 16(sp)
 ;   blr
 ; block4:
 ;   load_const r3, 0xffffffffffffffff
+;   ld r0, 8(sp)
+;   mtlr r0
+;   ld fp, 0(sp)
+;   load_addr sp, 16(sp)
 ;   blr
 ;
 ; Disassembled:
 ; block0: ; offset 0x0
+;   mflr r0
+;   addi r1, r1, -0x10
+;   std r0, 8(r1)
+;   std r31, 0(r1)
+;   ori r31, r1, 0
+; block1: ; offset 0x14
 ;   clrldi r7, r3, 0x20
 ;   cmpldi r7, 3
-;   blt 0x10
-;   b 0x50
-;   bdnzl 0x14
+;   blt 0x24
+;   b 0x94
+;   bdnzl 0x28
 ;   mflr r6
 ;   sldi r7, r7, 2
 ;   add r6, r6, r7
 ;   addi r6, r6, 0x18
 ;   mtctr r6
 ;   bctr
-;   b 0x48
-;   b 0x40
-;   b 0x38
-; block1: ; offset 0x38
+;   b 0x7c
+;   b 0x64
+;   b 0x4c
+; block2: ; offset 0x4c
 ;   li r3, 3
+;   ld r0, 8(r1)
+;   mtlr r0
+;   ld r31, 0(r1)
+;   addi r1, r1, 0x10
 ;   blr
-; block2: ; offset 0x40
+; block3: ; offset 0x64
 ;   li r3, 2
+;   ld r0, 8(r1)
+;   mtlr r0
+;   ld r31, 0(r1)
+;   addi r1, r1, 0x10
 ;   blr
-; block3: ; offset 0x48
+; block4: ; offset 0x7c
 ;   li r3, 1
+;   ld r0, 8(r1)
+;   mtlr r0
+;   ld r31, 0(r1)
+;   addi r1, r1, 0x10
 ;   blr
-; block4: ; offset 0x50
+; block5: ; offset 0x94
 ;   li r3, -1
+;   ld r0, 8(r1)
+;   mtlr r0
+;   ld r31, 0(r1)
+;   addi r1, r1, 0x10
 ;   blr
 

@@ -1,11 +1,12 @@
 test compile precise-output
 target powerpc64le
 
-; `fcfid` and friends read a 64-bit integer out of an FPR, so the value is
-; widened in a GPR (matching the conversion's signedness) and transferred.
-function %from_sint_i64(i64) -> f64 {
-block0(v0: i64):
-    v1 = fcvt_from_sint.f64 v0
+; The trapping conversions check NaN and both exclusive range bounds
+; explicitly: the hardware conversions saturate rather than trap. The
+; saturating forms need only the NaN-to-zero fixup.
+function %to_sint64(f64) -> i64 {
+block0(v0: f64):
+    v1 = fcvt_to_sint.i64 v0
     return v1
 }
 
@@ -16,8 +17,7 @@ block0(v0: i64):
 ;   std fp, 0(sp)
 ;   mr fp, sp
 ; block0:
-;   mtvsrd f2, r3
-;   fcfid.f64 f1, f2
+;   fcvt_to_sint.i64 r3, f1
 ;   ld r0, 8(sp)
 ;   mtlr r0
 ;   ld fp, 0(sp)
@@ -32,17 +32,33 @@ block0(v0: i64):
 ;   std r31, 0(r1)
 ;   ori r31, r1, 0
 ; block1: ; offset 0x14
-;   mtvsrd f2, r3
-;   fcfid f1, f2
+;   fcmpu cr0, f1, f1
+;   bns 0x20
+;   .byte 0x00, 0x00, 0x00, 0x00 ; trap: bad_toint
+;   lis r3, -0x3c20
+;   sldi r3, r3, 0x20
+;   ori r3, r3, 1
+;   mtvsrd f3, r3
+;   fcmpu cr0, f1, f3
+;   bgt 0x3c
+;   .byte 0x00, 0x00, 0x00, 0x00 ; trap: int_ovf
+;   lis r3, 0x43e0
+;   sldi r3, r3, 0x20
+;   mtvsrd f3, r3
+;   fcmpu cr0, f1, f3
+;   blt 0x54
+;   .byte 0x00, 0x00, 0x00, 0x00 ; trap: int_ovf
+;   fctidz f3, f1
+;   mffprd r3, f3
 ;   ld r0, 8(r1)
 ;   mtlr r0
 ;   ld r31, 0(r1)
 ;   addi r1, r1, 0x10
 ;   blr
 
-function %from_uint_i64(i64) -> f64 {
-block0(v0: i64):
-    v1 = fcvt_from_uint.f64 v0
+function %to_uint32(f64) -> i32 {
+block0(v0: f64):
+    v1 = fcvt_to_uint.i32 v0
     return v1
 }
 
@@ -53,8 +69,7 @@ block0(v0: i64):
 ;   std fp, 0(sp)
 ;   mr fp, sp
 ; block0:
-;   mtvsrd f2, r3
-;   fcfidu.f64 f1, f2
+;   fcvt_to_uint.i32 r3, f1
 ;   ld r0, 8(sp)
 ;   mtlr r0
 ;   ld fp, 0(sp)
@@ -69,17 +84,32 @@ block0(v0: i64):
 ;   std r31, 0(r1)
 ;   ori r31, r1, 0
 ; block1: ; offset 0x14
-;   mtvsrd f2, r3
-;   fcfidu f1, f2
+;   fcmpu cr0, f1, f1
+;   bns 0x20
+;   .byte 0x00, 0x00, 0x00, 0x00 ; trap: bad_toint
+;   lis r3, -0x4010
+;   sldi r3, r3, 0x20
+;   mtvsrd f3, r3
+;   fcmpu cr0, f1, f3
+;   bgt 0x38
+;   .byte 0x00, 0x00, 0x00, 0x00 ; trap: int_ovf
+;   lis r3, 0x41f0
+;   sldi r3, r3, 0x20
+;   mtvsrd f3, r3
+;   fcmpu cr0, f1, f3
+;   blt 0x50
+;   .byte 0x00, 0x00, 0x00, 0x00 ; trap: int_ovf
+;   fctiwuz f3, f1
+;   mffprd r3, f3
 ;   ld r0, 8(r1)
 ;   mtlr r0
 ;   ld r31, 0(r1)
 ;   addi r1, r1, 0x10
 ;   blr
 
-function %from_sint_i32(i32) -> f64 {
-block0(v0: i32):
-    v1 = fcvt_from_sint.f64 v0
+function %to_sint32_from_f32(f32) -> i32 {
+block0(v0: f32):
+    v1 = fcvt_to_sint.i32 v0
     return v1
 }
 
@@ -90,9 +120,7 @@ block0(v0: i32):
 ;   std fp, 0(sp)
 ;   mr fp, sp
 ; block0:
-;   sext.32->64 r3, r3
-;   mtvsrd f4, r3
-;   fcfid.f64 f1, f4
+;   fcvt_to_sint.i32 r3, f1
 ;   ld r0, 8(sp)
 ;   mtlr r0
 ;   ld fp, 0(sp)
@@ -107,18 +135,33 @@ block0(v0: i32):
 ;   std r31, 0(r1)
 ;   ori r31, r1, 0
 ; block1: ; offset 0x14
-;   extsw r3, r3
-;   mtvsrd f4, r3
-;   fcfid f1, f4
+;   fcmpu cr0, f1, f1
+;   bns 0x20
+;   .byte 0x00, 0x00, 0x00, 0x00 ; trap: bad_toint
+;   lis r3, -0x3e20
+;   sldi r3, r3, 0x20
+;   oris r3, r3, 0x2000
+;   mtvsrd f3, r3
+;   fcmpu cr0, f1, f3
+;   bgt 0x3c
+;   .byte 0x00, 0x00, 0x00, 0x00 ; trap: int_ovf
+;   lis r3, 0x41e0
+;   sldi r3, r3, 0x20
+;   mtvsrd f3, r3
+;   fcmpu cr0, f1, f3
+;   blt 0x54
+;   .byte 0x00, 0x00, 0x00, 0x00 ; trap: int_ovf
+;   fctiwz f3, f1
+;   mffprd r3, f3
 ;   ld r0, 8(r1)
 ;   mtlr r0
 ;   ld r31, 0(r1)
 ;   addi r1, r1, 0x10
 ;   blr
 
-function %from_uint_i32(i32) -> f64 {
-block0(v0: i32):
-    v1 = fcvt_from_uint.f64 v0
+function %to_sint64_sat(f64) -> i64 {
+block0(v0: f64):
+    v1 = fcvt_to_sint_sat.i64 v0
     return v1
 }
 
@@ -129,9 +172,7 @@ block0(v0: i32):
 ;   std fp, 0(sp)
 ;   mr fp, sp
 ; block0:
-;   zext.32->64 r3, r3
-;   mtvsrd f4, r3
-;   fcfidu.f64 f1, f4
+;   fcvt_to_sint_sat.i64 r3, f1
 ;   ld r0, 8(sp)
 ;   mtlr r0
 ;   ld fp, 0(sp)
@@ -146,18 +187,21 @@ block0(v0: i32):
 ;   std r31, 0(r1)
 ;   ori r31, r1, 0
 ; block1: ; offset 0x14
-;   clrldi r3, r3, 0x20
-;   mtvsrd f4, r3
-;   fcfidu f1, f4
+;   fcmpu cr0, f1, f1
+;   bns 0x24
+;   li r3, 0
+;   b 0x2c
+;   fctidz f3, f1
+;   mffprd r3, f3
 ;   ld r0, 8(r1)
 ;   mtlr r0
 ;   ld r31, 0(r1)
 ;   addi r1, r1, 0x10
 ;   blr
 
-function %from_sint_i32_f32(i32) -> f32 {
-block0(v0: i32):
-    v1 = fcvt_from_sint.f32 v0
+function %to_uint64_sat(f32) -> i64 {
+block0(v0: f32):
+    v1 = fcvt_to_uint_sat.i64 v0
     return v1
 }
 
@@ -168,9 +212,7 @@ block0(v0: i32):
 ;   std fp, 0(sp)
 ;   mr fp, sp
 ; block0:
-;   sext.32->64 r3, r3
-;   mtvsrd f4, r3
-;   fcfid.f32 f1, f4
+;   fcvt_to_uint_sat.i64 r3, f1
 ;   ld r0, 8(sp)
 ;   mtlr r0
 ;   ld fp, 0(sp)
@@ -185,9 +227,12 @@ block0(v0: i32):
 ;   std r31, 0(r1)
 ;   ori r31, r1, 0
 ; block1: ; offset 0x14
-;   extsw r3, r3
-;   mtvsrd f4, r3
-;   fcfids f1, f4
+;   fcmpu cr0, f1, f1
+;   bns 0x24
+;   li r3, 0
+;   b 0x2c
+;   fctiduz f3, f1
+;   mffprd r3, f3
 ;   ld r0, 8(r1)
 ;   mtlr r0
 ;   ld r31, 0(r1)

@@ -100,6 +100,22 @@ impl ABIMachineSpec for Ppc64MachineDeps {
 
         // Argument registers per ELFv2: ints in r3-r10, floats in
         // f1-f13. Return values in r3-r4 / f1-f2.
+        //
+        // For everything except our own tail convention the allocation is
+        // *positional*, as ELFv2 requires for native interop: each
+        // parameter owns a doubleword slot in the caller's parameter save
+        // area starting at SP+32 (whether or not it is passed in a
+        // register), an integer parameter uses the GPR corresponding to
+        // its slot (r3 + slot index, while slots remain), and a float
+        // parameter uses the next FPR but still consumes its slot, so a
+        // later integer skips that GPR. Stack-passed parameters live at
+        // their positional slot, NOT densely packed: a native callee
+        // reads its ninth parameter at SP+32+64, unconditionally.
+        //
+        // The tail convention packs both register classes and the stack
+        // densely instead, which is more efficient and private to code
+        // this backend compiles.
+        let positional = args_or_rets == ArgsOrRets::Args && call_conv != isa::CallConv::Tail;
         let (x_start, x_end, f_start, f_end) = match args_or_rets {
             ArgsOrRets::Args => (3, 10, 1, 13),
             ArgsOrRets::Rets => (3, 4, 1, 2),
@@ -107,10 +123,13 @@ impl ABIMachineSpec for Ppc64MachineDeps {
         let mut next_x_reg = x_start;
         let mut next_f_reg = f_start;
         let mut next_stack: u32 = 0;
+        // Parameter doubleword index, for the positional scheme.
+        let mut slot_idx: u32 = 0;
 
         let ret_area_ptr = if add_ret_area_ptr {
             assert!(ArgsOrRets::Args == args_or_rets);
             next_x_reg += 1;
+            slot_idx += 1;
             Some(ABIArg::reg(
                 gpr(x_start).to_real_reg().unwrap(),
                 I64,
@@ -132,7 +151,23 @@ impl ABIMachineSpec for Ppc64MachineDeps {
             let (rcs, reg_tys) = Inst::rc_for_type(&param.value_type)?;
             let mut slots = ABIArgSlotVec::new();
             for (rc, reg_ty) in rcs.iter().zip(reg_tys.iter()) {
-                let next_reg = if (next_x_reg <= x_end) && *rc == RegClass::Int {
+                let next_reg = if positional {
+                    match rc {
+                        RegClass::Int if slot_idx < 8 => Some(gpr(3 + slot_idx as usize)),
+                        // Floats use successive FPRs by float-parameter
+                        // order, independent of the slot index. (Floats
+                        // beyond f13 whose slot is still in r3-r10 would
+                        // go in that GPR per ELFv2; that case cannot be
+                        // represented here and falls to the stack slot,
+                        // which no realistic signature reaches.)
+                        RegClass::Float if next_f_reg <= f_end => {
+                            let x = Some(fpr(next_f_reg));
+                            next_f_reg += 1;
+                            x
+                        }
+                        _ => None,
+                    }
+                } else if (next_x_reg <= x_end) && *rc == RegClass::Int {
                     let x = Some(gpr(next_x_reg));
                     next_x_reg += 1;
                     x
@@ -158,21 +193,31 @@ impl ABIMachineSpec for Ppc64MachineDeps {
                         ));
                     }
 
-                    // Keep the ELFv2 32-byte header reserved at the base
-                    // of the outgoing-argument area (arguments only; the
-                    // return area is a separate buffer).
-                    if next_stack == 0 && args_or_rets == ArgsOrRets::Args {
-                        next_stack = STACK_ARG_BASE;
-                    }
-                    let size = (reg_ty.bits() / 8).max(8);
-                    debug_assert!(size.is_power_of_two());
-                    next_stack = align_to(next_stack, size);
+                    let offset = if positional {
+                        // The parameter's own doubleword slot.
+                        STACK_ARG_BASE + slot_idx * 8
+                    } else {
+                        // Keep the ELFv2 32-byte header reserved at the
+                        // base of the outgoing-argument area (arguments
+                        // only; the return area is a separate buffer).
+                        if next_stack == 0 && args_or_rets == ArgsOrRets::Args {
+                            next_stack = STACK_ARG_BASE;
+                        }
+                        let size = (reg_ty.bits() / 8).max(8);
+                        debug_assert!(size.is_power_of_two());
+                        next_stack = align_to(next_stack, size);
+                        let off = next_stack;
+                        next_stack += size;
+                        off
+                    };
                     slots.push(ABIArgSlot::Stack {
-                        offset: next_stack as i64,
+                        offset: offset as i64,
                         ty: *reg_ty,
                         extension: param.extension,
                     });
-                    next_stack += size;
+                }
+                if positional {
+                    slot_idx += 1;
                 }
             }
             args.push(ABIArg::Slots {
@@ -181,12 +226,33 @@ impl ABIMachineSpec for Ppc64MachineDeps {
             });
         }
 
+        // Under the positional scheme, any stack-passed parameter implies
+        // the parameter save area covers every slot from the first.
+        if positional && slot_idx > 8 {
+            next_stack = STACK_ARG_BASE + slot_idx * 8;
+        }
+
         let pos = if let Some(ret_area_ptr) = ret_area_ptr {
             args.push_non_formal(ret_area_ptr);
             Some(args.args().len() - 1)
         } else {
             None
         };
+
+        // An ELFv2 callee owns a 32-byte header at the bottom of its
+        // *caller's* frame: the back-chain word, and the CR, LR and TOC
+        // save doublewords. Native code writes there unconditionally --
+        // saving LR at entry SP + 16 is the very first thing a gcc
+        // prologue does -- so every call that may land in native code
+        // must reserve the header even when no arguments are passed on
+        // the stack. Without this, a callee's LR save lands on whatever
+        // the calling frame keeps at SP + 0, e.g. its first spill slot.
+        //
+        // Our own tail-convention callees never write to the caller's
+        // frame, so tail calls skip the reservation.
+        if args_or_rets == ArgsOrRets::Args && call_conv != isa::CallConv::Tail {
+            next_stack = next_stack.max(STACK_ARG_BASE);
+        }
 
         next_stack = align_to(next_stack, Self::stack_align(call_conv));
 
@@ -408,9 +474,15 @@ impl ABIMachineSpec for Ppc64MachineDeps {
             vreg: a0(),
             preg: a0(),
         });
+        // This call happens during the prologue, before any outgoing-args
+        // area exists, and a native callee stores its LR/CR/TOC saves into
+        // the 32 bytes above its entry SP. Give it a scratch header so
+        // those writes cannot land on the frame record just established.
+        insts.extend(Self::gen_sp_reg_adjust(-(STACK_ARG_BASE as i32)));
         insts.push(Inst::Call {
             info: Box::new(info),
         });
+        insts.extend(Self::gen_sp_reg_adjust(STACK_ARG_BASE as i32));
     }
 
     fn gen_inline_probestack(

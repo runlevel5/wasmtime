@@ -12,27 +12,46 @@ block0(v0: i64, v1: i64):
 }
 
 ; VCode:
+;   mflr r0
+;   load_addr sp, -16(sp)
+;   std r0, 8(sp)
+;   std fp, 0(sp)
+;   mr fp, sp
 ; block0:
 ;   mr r5, r3
 ;   sdiv.i64 r3, r5, r4
+;   ld r0, 8(sp)
+;   mtlr r0
+;   ld fp, 0(sp)
+;   load_addr sp, 16(sp)
 ;   blr
 ;
 ; Disassembled:
 ; block0: ; offset 0x0
+;   mflr r0
+;   addi r1, r1, -0x10
+;   std r0, 8(r1)
+;   std r31, 0(r1)
+;   ori r31, r1, 0
+; block1: ; offset 0x14
 ;   ori r5, r3, 0
 ;   cmpdi r4, 0
-;   bne 0x10
+;   bne 0x24
 ;   .byte 0x00, 0x00, 0x00, 0x00 ; trap: int_divz
 ;   cmpdi r4, -1
-;   bne 0x34
+;   bne 0x48
 ;   lis r0, -0x8000
 ;   sldi r0, r0, 0x20
 ;   cmpd r5, r0
-;   bne 0x2c
+;   bne 0x40
 ;   .byte 0x00, 0x00, 0x00, 0x00 ; trap: int_ovf
 ;   neg r3, r5
-;   b 0x38
+;   b 0x4c
 ;   divd r3, r5, r4
+;   ld r0, 8(r1)
+;   mtlr r0
+;   ld r31, 0(r1)
+;   addi r1, r1, 0x10
 ;   blr
 
 function %udiv_i64(i64, i64) -> i64 {
@@ -42,18 +61,37 @@ block0(v0: i64, v1: i64):
 }
 
 ; VCode:
+;   mflr r0
+;   load_addr sp, -16(sp)
+;   std r0, 8(sp)
+;   std fp, 0(sp)
+;   mr fp, sp
 ; block0:
 ;   mr r5, r3
 ;   udiv.i64 r3, r5, r4
+;   ld r0, 8(sp)
+;   mtlr r0
+;   ld fp, 0(sp)
+;   load_addr sp, 16(sp)
 ;   blr
 ;
 ; Disassembled:
 ; block0: ; offset 0x0
+;   mflr r0
+;   addi r1, r1, -0x10
+;   std r0, 8(r1)
+;   std r31, 0(r1)
+;   ori r31, r1, 0
+; block1: ; offset 0x14
 ;   ori r5, r3, 0
 ;   cmpdi r4, 0
-;   bne 0x10
+;   bne 0x24
 ;   .byte 0x00, 0x00, 0x00, 0x00 ; trap: int_divz
 ;   divdu r3, r5, r4
+;   ld r0, 8(r1)
+;   mtlr r0
+;   ld r31, 0(r1)
+;   addi r1, r1, 0x10
 ;   blr
 
 function %srem_i64(i64, i64) -> i64 {
@@ -63,24 +101,43 @@ block0(v0: i64, v1: i64):
 }
 
 ; VCode:
+;   mflr r0
+;   load_addr sp, -16(sp)
+;   std r0, 8(sp)
+;   std fp, 0(sp)
+;   mr fp, sp
 ; block0:
 ;   mr r5, r3
 ;   srem.i64 r3, r5, r4
+;   ld r0, 8(sp)
+;   mtlr r0
+;   ld fp, 0(sp)
+;   load_addr sp, 16(sp)
 ;   blr
 ;
 ; Disassembled:
 ; block0: ; offset 0x0
+;   mflr r0
+;   addi r1, r1, -0x10
+;   std r0, 8(r1)
+;   std r31, 0(r1)
+;   ori r31, r1, 0
+; block1: ; offset 0x14
 ;   ori r5, r3, 0
 ;   cmpdi r4, 0
-;   bne 0x10
+;   bne 0x24
 ;   .byte 0x00, 0x00, 0x00, 0x00 ; trap: int_divz
 ;   cmpdi r4, -1
-;   bne 0x20
+;   bne 0x34
 ;   li r3, 0
-;   b 0x2c
+;   b 0x40
 ;   divd r0, r5, r4
 ;   mulld r0, r0, r4
 ;   subf r3, r0, r5
+;   ld r0, 8(r1)
+;   mtlr r0
+;   ld r31, 0(r1)
+;   addi r1, r1, 0x10
 ;   blr
 
 function %urem_i64(i64, i64) -> i64 {
@@ -90,20 +147,39 @@ block0(v0: i64, v1: i64):
 }
 
 ; VCode:
+;   mflr r0
+;   load_addr sp, -16(sp)
+;   std r0, 8(sp)
+;   std fp, 0(sp)
+;   mr fp, sp
 ; block0:
 ;   mr r5, r3
 ;   urem.i64 r3, r5, r4
+;   ld r0, 8(sp)
+;   mtlr r0
+;   ld fp, 0(sp)
+;   load_addr sp, 16(sp)
 ;   blr
 ;
 ; Disassembled:
 ; block0: ; offset 0x0
+;   mflr r0
+;   addi r1, r1, -0x10
+;   std r0, 8(r1)
+;   std r31, 0(r1)
+;   ori r31, r1, 0
+; block1: ; offset 0x14
 ;   ori r5, r3, 0
 ;   cmpdi r4, 0
-;   bne 0x10
+;   bne 0x24
 ;   .byte 0x00, 0x00, 0x00, 0x00 ; trap: int_divz
 ;   divdu r0, r5, r4
 ;   mulld r0, r0, r4
 ;   subf r3, r0, r5
+;   ld r0, 8(r1)
+;   mtlr r0
+;   ld r31, 0(r1)
+;   addi r1, r1, 0x10
 ;   blr
 
 function %sdiv_i32(i32, i32) -> i32 {
@@ -113,25 +189,44 @@ block0(v0: i32, v1: i32):
 }
 
 ; VCode:
+;   mflr r0
+;   load_addr sp, -16(sp)
+;   std r0, 8(sp)
+;   std fp, 0(sp)
+;   mr fp, sp
 ; block0:
 ;   mr r5, r3
 ;   sdiv.i32 r3, r5, r4
+;   ld r0, 8(sp)
+;   mtlr r0
+;   ld fp, 0(sp)
+;   load_addr sp, 16(sp)
 ;   blr
 ;
 ; Disassembled:
 ; block0: ; offset 0x0
+;   mflr r0
+;   addi r1, r1, -0x10
+;   std r0, 8(r1)
+;   std r31, 0(r1)
+;   ori r31, r1, 0
+; block1: ; offset 0x14
 ;   ori r5, r3, 0
 ;   cmpwi r4, 0
-;   bne 0x10
+;   bne 0x24
 ;   .byte 0x00, 0x00, 0x00, 0x00 ; trap: int_divz
 ;   cmpwi r4, -1
-;   bne 0x30
+;   bne 0x44
 ;   lis r0, -0x8000
 ;   cmpw r5, r0
-;   bne 0x28
+;   bne 0x3c
 ;   .byte 0x00, 0x00, 0x00, 0x00 ; trap: int_ovf
 ;   neg r3, r5
-;   b 0x34
+;   b 0x48
 ;   divw r3, r5, r4
+;   ld r0, 8(r1)
+;   mtlr r0
+;   ld r31, 0(r1)
+;   addi r1, r1, 0x10
 ;   blr
 
