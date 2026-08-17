@@ -1,7 +1,7 @@
 //! Implementation of the `wasmtime hot-blocks` subcommand.
 
 use crate::common::{RunCommon, RunTarget};
-use capstone::arch::BuildsCapstone;
+use capstone::arch::{BuildsCapstone, BuildsCapstoneEndian};
 use clap::Parser;
 use std::borrow::Cow;
 use std::collections::BTreeMap;
@@ -593,6 +593,13 @@ fn build_capstone(target: &target_lexicon::Triple) -> Result<capstone::Capstone>
         target_lexicon::Architecture::S390x => capstone::Capstone::new()
             .sysz()
             .mode(capstone::arch::sysz::ArchMode::Default)
+            .detail(true)
+            .build()
+            .map_err(|e| format_err!("{e}"))?,
+        target_lexicon::Architecture::Powerpc64le => capstone::Capstone::new()
+            .ppc()
+            .mode(capstone::arch::ppc::ArchMode::Mode64)
+            .endian(capstone::Endian::Little)
             .detail(true)
             .build()
             .map_err(|e| format_err!("{e}"))?,

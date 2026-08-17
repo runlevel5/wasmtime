@@ -167,6 +167,17 @@ const FULL_MATRIX = [
     "qemu_target": "s390x-linux-user",
   },
   {
+    "name": "Test Linux ppc64le",
+    "os": ubuntu,
+    "target": "powerpc64le-unknown-linux-gnu",
+    "filter": "linux-ppc64le",
+    "isa": "ppc64",
+    "gcc_package": "gcc-powerpc64le-linux-gnu",
+    "gcc": "powerpc64le-linux-gnu-gcc",
+    "qemu": "qemu-ppc64le -cpu power9 -L /usr/powerpc64le-linux-gnu",
+    "qemu_target": "ppc64le-linux-user",
+  },
+  {
     "name": "Test Linux riscv64",
     "os": ubuntu,
     "target": "riscv64gc-unknown-linux-gnu",

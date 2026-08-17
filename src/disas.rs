@@ -31,6 +31,7 @@ pub fn disas(elf: &ElfFile64<'_, Endianness>, func: &[u8], addr: u64) -> Result<
         Architecture::X86_64 => "x86_64",
         Architecture::Aarch64 => "aarch64",
         Architecture::S390x => "s390x",
+        Architecture::PowerPc64 => "powerpc64le",
         Architecture::Riscv64 => {
             let e_flags = match elf.flags() {
                 FileFlags::Elf { e_flags, .. } => e_flags,

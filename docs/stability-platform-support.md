@@ -14,7 +14,7 @@ interpreter backend is used if it's not supported.
 
 ## Compiler Support
 
-Cranelift supports x86\_64, aarch64, s390x, and riscv64. No 32-bit platform is
+Cranelift supports x86\_64, aarch64, s390x, riscv64, and ppc64le. No 32-bit platform is
 currently supported. Building a new backend for Cranelift is a relatively large
 undertaking which maintainers are willing to help with but it's recommended to
 reach out to Cranelift maintainers first to discuss this.

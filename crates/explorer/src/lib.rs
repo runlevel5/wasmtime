@@ -5,7 +5,7 @@
 //! > Wasmtime repository to start a discussion about doing so, but otherwise
 //! > be aware that your usage of this crate is not supported.
 
-use capstone::arch::BuildsCapstone;
+use capstone::arch::{BuildsCapstone, BuildsCapstoneEndian};
 use serde_derive::Serialize;
 use std::{
     fs::File,
@@ -193,6 +193,12 @@ fn annotate_asm(
                 target_lexicon::Architecture::S390x => capstone::Capstone::new()
                     .sysz()
                     .mode(capstone::arch::sysz::ArchMode::Default)
+                    .build()
+                    .map_err(|e| wasmtime::format_err!("{e}"))?,
+                target_lexicon::Architecture::Powerpc64le => capstone::Capstone::new()
+                    .ppc()
+                    .mode(capstone::arch::ppc::ArchMode::Mode64)
+                    .endian(capstone::Endian::Little)
                     .build()
                     .map_err(|e| wasmtime::format_err!("{e}"))?,
                 target_lexicon::Architecture::X86_64 => capstone::Capstone::new()

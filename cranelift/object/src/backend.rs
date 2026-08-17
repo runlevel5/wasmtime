@@ -104,6 +104,21 @@ impl ObjectBuilder {
                 object::Architecture::Riscv64
             }
             target_lexicon::Architecture::S390x => object::Architecture::S390x,
+            target_lexicon::Architecture::Powerpc64le => {
+                if binary_format != object::BinaryFormat::Elf {
+                    return Err(ModuleError::Backend(anyhow!(
+                        "binary format {binary_format:?} is not supported for ppc64le",
+                    )));
+                }
+                // ELF ABI version 2, which is the only one this backend
+                // targets.
+                file_flags = object::FileFlags::Elf {
+                    os_abi: object::elf::ELFOSABI_NONE,
+                    abi_version: 2,
+                    e_flags: object::elf::FileFlags(0),
+                };
+                object::Architecture::PowerPc64
+            }
             architecture => {
                 return Err(ModuleError::Backend(anyhow!(
                     "target architecture {architecture:?} is unsupported",
@@ -1019,6 +1034,11 @@ impl ObjectModule {
                     r_length: 2,
                 },
                 _ => unimplemented!("Aarch64AddAbsLo12Nc is not supported for this file format"),
+            },
+            // The low 26 bits of an I-form branch: a PC-relative signed
+            // 24-bit word offset, i.e. R_PPC64_REL24.
+            Reloc::Ppc64Call => RelocationFlags::Elf {
+                r_type: object::elf::R_PPC64_REL24,
             },
             Reloc::S390xPCRel32Dbl => RelocationFlags::Generic {
                 kind: RelocationKind::Relative,

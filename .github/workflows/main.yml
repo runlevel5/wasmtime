@@ -625,7 +625,7 @@ jobs:
             cargo check -p wasmtime --no-default-features --features runtime,gc,component-model-async,pulley,debug,debug-builtins,demangle,anyhow &&
             cargo check -p cranelift-control --no-default-features &&
             cargo check -p cranelift-assembler-x64 --lib &&
-            cargo check -p cranelift-codegen --no-default-features --features x86,arm64,riscv64 &&
+            cargo check -p cranelift-codegen --no-default-features --features x86,arm64,riscv64,ppc64 &&
             cargo check -p cranelift-frontend --no-default-features &&
             cargo check -p pulley-interpreter --features encode,decode,disas,interp &&
             cargo check -p wasmtime-wasi-io --no-default-features
@@ -642,22 +642,15 @@ jobs:
           test: cargo build
           env:
             IPHONEOS_DEPLOYMENT_TARGET: 13.0
-        # Test that when Cranelift has no support for an architecture, even a
-        # 64-bit one, that Wasmtime still compiles. Note that this is also
-        # intended to test various fallbacks in the codebase where we have no
-        # support at all for a particular architecture. In theory if someone
-        # adds powerpc64 support to Wasmtime this should get switched to some
-        # other architecture.
-        - target: powerpc64le-unknown-linux-gnu
-          os: ubuntu-latest
-          test: cargo build
-          apt_packages: gcc-powerpc64le-linux-gnu
-          env:
-            CARGO_TARGET_POWERPC64LE_UNKNOWN_LINUX_GNU_LINKER: powerpc64le-linux-gnu-gcc
         # A no_std target without 64-bit atomics
         - target: riscv32imac-unknown-none-elf
           os: ubuntu-latest
           test: cargo check -p wasmtime --no-default-features --features runtime,gc,component-model,async
+        # This also tests that when Cranelift has no support for an
+        # architecture, even a 64-bit one, Wasmtime still compiles, exercising
+        # the fallbacks used where there is no support at all for a particular
+        # architecture. If someone adds loongarch64 support to Wasmtime this
+        # should get switched to some other architecture.
         - target: loongarch64-unknown-linux-gnu
           os: ubuntu-latest
           test: cargo build

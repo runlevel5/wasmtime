@@ -112,7 +112,7 @@ For explanations of what each tier means see below.
 | Target               | `armv7-unknown-linux-gnueabihf`   | full-time maintainer |
 | Target               | `i686-pc-windows-msvc`            | CI testing, full-time maintainer |
 | Target               | `i686-unknown-linux-gnu`          | full-time maintainer |
-| Target               | `powerpc64le-unknown-linux-gnu`   | CI testing, full-time maintainer |
+| Target               | `powerpc64le-unknown-linux-gnu`   | full-time maintainer        |
 | Target               | `riscv32imac-unknown-none-elf`[^5]| CI testing, full-time maintainer |
 | Target               | `riscv64gc-unknown-linux-gnu`     | full-time maintainer        |
 | Target               | `wasm32-wasip1` [^3]              | Supported but not tested    |
@@ -181,7 +181,7 @@ features to figure out how best to implement them and at least move them to Tier
 * Cranelift Target: ARM 32-bit
 * Cranelift Target: MIPS
 * Cranelift Target: SPARC
-* Cranelift Target: PowerPC
+* Cranelift Target: PowerPC 32-bit, and 64-bit big-endian
 * Cranelift Target: RISC-V 32-bit
 * WebAssembly Proposals: see [documentation here](./stability-wasm-proposals.md)
 * [WASI proposal: `proxy-wasm`](https://github.com/proxy-wasm/spec)

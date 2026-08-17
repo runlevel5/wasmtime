@@ -153,6 +153,20 @@ impl CompiledBlob {
                     let pcrel = i32::try_from(((what as isize) - (at as isize)) >> 1).unwrap();
                     unsafe { write_unaligned(at as *mut i32, pcrel) };
                 }
+                Reloc::Ppc64Call => {
+                    let what = relocation_target_addr(name, addend);
+                    // The I-form branch holds a signed 24-bit word offset
+                    // in bits 25:2, reaching +/-32 MiB. Out-of-range
+                    // targets would need a veneer, which is not
+                    // implemented here.
+                    let diff = (what as isize) - (at as isize);
+                    assert!(
+                        diff % 4 == 0 && ((diff >> 25) == -1 || (diff >> 25) == 0),
+                        "ppc64 call target is out of range for a direct branch"
+                    );
+                    let imm = (diff as u32) & 0x03FF_FFFC;
+                    unsafe { modify_inst32(at as *mut u32, |inst| inst | imm) };
+                }
                 Reloc::Arm64Call => {
                     let what = relocation_target_addr(name, addend);
                     // The instruction is 32 bits long.
