@@ -184,6 +184,24 @@ pub fn infer_native_flags(isa_builder: &mut dyn Configurable) -> Result<(), &'st
         let _ = riscv::cpuinfo_detect(isa_builder);
     }
 
+    // There is no `is_powerpc_feature_detected`, so read the auxiliary
+    // vector directly. The backend's baseline is POWER8 (ISA 2.07), which
+    // every ppc64le part satisfies, so only the later levels are probed.
+    #[cfg(all(target_arch = "powerpc64", target_os = "linux"))]
+    {
+        // From the kernel's <asm/cputable.h>.
+        const PPC_FEATURE2_ARCH_3_00: libc::c_ulong = 0x0080_0000;
+        const PPC_FEATURE2_ARCH_3_1: libc::c_ulong = 0x0004_0000;
+
+        let hwcap2 = unsafe { libc::getauxval(libc::AT_HWCAP2) };
+        if hwcap2 & PPC_FEATURE2_ARCH_3_00 != 0 {
+            isa_builder.enable("has_isa_3_0").unwrap();
+        }
+        if hwcap2 & PPC_FEATURE2_ARCH_3_1 != 0 {
+            isa_builder.enable("has_isa_3_1").unwrap();
+        }
+    }
+
     // On all other architectures (e.g. wasm32) we won't infer any native flags,
     // but still need to use the `isa_builder` to avoid compiler warnings.
     let _ = isa_builder;

@@ -805,6 +805,26 @@ impl MachInstEmit for Inst {
                 sink.put8(0);
             }
 
+            &Inst::MovFromPReg { rd, rm } => {
+                debug_assert!(rm == 1 || rm == 31);
+                sink.put4(enc_d_logic(24, u32::from(rm), reg_num(rd.to_reg()), 0));
+            }
+
+            &Inst::LabelAddress { rd, label } => {
+                // bcl 20,31,$+4 ; mflr rd ; addis rd, rd, 0 ; addi rd, rd, 0
+                //
+                // LR holds the address of the `mflr`; the addis/addi pair
+                // is patched with the label's offset from that point once
+                // it is known. LR is dead here, as at LoadExtName.
+                let rd = reg_num(rd.to_reg());
+                sink.put4(BCL_20_31_PLUS4);
+                sink.put4(enc_mflr(rd));
+                let hi_lo_off = sink.cur_offset();
+                sink.use_label_at_offset(hi_lo_off, label, LabelUse::PCRelHiLo);
+                sink.put4(enc_d(15, rd, rd, 0)); // addis rd, rd, 0
+                sink.put4(enc_d(14, rd, rd, 0)); // addi rd, rd, 0
+            }
+
             &Inst::Mflr { rd } => sink.put4(enc_mflr(reg_num(rd.to_reg()))),
             &Inst::Mtlr { rs } => sink.put4(enc_mtlr(reg_num(rs))),
 

@@ -58,11 +58,11 @@ block0(v0: i64):
 ;   li r4, 0
 ;   cmpld r3, r4
 ;   bne 0x10
-;   trap ; trap: user1
+;   .byte 0x00, 0x00, 0x00, 0x00 ; trap: user1
 ;   li r4, 0
 ;   cmpld r3, r4
 ;   beq 0x20
-;   trap ; trap: user2
+;   .byte 0x00, 0x00, 0x00, 0x00 ; trap: user2
 ;   blr
 
 function %iadd_imm(i64) -> i64 {

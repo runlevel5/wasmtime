@@ -77,5 +77,5 @@ block2:
 ; block1: ; offset 0xc
 ;   blr
 ; block2: ; offset 0x10
-;   trap ; trap: user1
+;   .byte 0x00, 0x00, 0x00, 0x00 ; trap: user1
 

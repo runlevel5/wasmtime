@@ -340,6 +340,20 @@
     (Mtlr
       (rs Reg))
 
+    ;; Read a fixed non-allocatable register (the stack or frame
+    ;; pointer, by number) into an ordinary register.
+    (MovFromPReg
+      (rd WritableReg)
+      (rm u8))
+
+    ;; Materialize the address of a label (e.g. an exception handler),
+    ;; via `bcl 20,31,$+4; mflr rd; addis rd, rd, ha; addi rd, rd, lo`
+    ;; with the hi/lo pair patched once the label is bound. Pre-POWER10
+    ;; PPC has no direct PC-relative address computation.
+    (LabelAddress
+      (rd WritableReg)
+      (label MachLabel))
+
     ;; Marker for unwind info.
     (Unwind
       (inst UnwindInst))
@@ -549,6 +563,24 @@
 (rule (cmp_set kind)
   (let ((dst WritableReg (temp_writable_reg $I64))
         (_ Unit (emit (MInst.CmpSet dst kind))))
+    dst))
+
+;; Reads of the stack/frame pointer and of the return address (which
+;; the prologue stored at [FP+8]).
+(decl ppc_mov_from_preg (u8) Reg)
+(rule (ppc_mov_from_preg rm)
+  (let ((dst WritableReg (temp_writable_reg $I64))
+        (_ Unit (emit (MInst.MovFromPReg dst rm))))
+    dst))
+
+(decl read_return_address () Reg)
+(extern constructor read_return_address read_return_address)
+
+;; The address of a label, for exception-handler tables.
+(decl ppc_label_address (MachLabel) Reg)
+(rule (ppc_label_address label)
+  (let ((dst WritableReg (temp_writable_reg $I64))
+        (_ Unit (emit (MInst.LabelAddress dst label))))
     dst))
 
 ;; Branch helpers.

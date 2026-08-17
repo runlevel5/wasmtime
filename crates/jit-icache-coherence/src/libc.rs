@@ -172,6 +172,51 @@ fn aarch64_flush_icache(start: u64, end: u64) {
     }
 }
 
+#[cfg(target_arch = "powerpc64")]
+fn ppc64_flush_icache(start: u64, end: u64) {
+    use core::arch::asm;
+
+    // PowerPC's instruction and data caches are not coherent with each
+    // other, so freshly written code has to be pushed out of the data cache
+    // and the matching instruction cache blocks invalidated before it can be
+    // executed. GCC's `__builtin___clear_cache` is not sufficient on its own
+    // here; the sequence below is the one the Linux kernel and QEMU use:
+    //
+    //     dcbst loop -> sync -> icbi loop -> sync -> isync
+    //
+    // `icbi` is broadcast across the coherence domain, so it invalidates
+    // other cores' instruction caches too, but each core still needs its own
+    // `isync` to discard anything it has already fetched. That is what
+    // `pipeline_flush_mt` would have to arrange for other threads; see the
+    // note there.
+    //
+    // 128 bytes is the cache block size on POWER8 and later, which is this
+    // backend's baseline. Stepping by more than the true block size would
+    // skip blocks, so this must never be raised without checking
+    // AT_DCACHEBSIZE / AT_ICACHEBSIZE.
+    const CACHE_LINE_SIZE: u64 = 128;
+
+    let first = start & !(CACHE_LINE_SIZE - 1);
+    let last = end.next_multiple_of(CACHE_LINE_SIZE);
+
+    let mut addr = first;
+    while addr < last {
+        unsafe { asm!("dcbst 0, {}", in(reg) addr, options(nostack, preserves_flags)) };
+        addr += CACHE_LINE_SIZE;
+    }
+    // Order the stores from the loop above ahead of the invalidations below.
+    unsafe { asm!("sync", options(nostack, preserves_flags)) };
+
+    let mut addr = first;
+    while addr < last {
+        unsafe { asm!("icbi 0, {}", in(reg) addr, options(nostack, preserves_flags)) };
+        addr += CACHE_LINE_SIZE;
+    }
+    // The `sync` waits for the invalidations to take effect, and `isync`
+    // then discards instructions this core has already fetched.
+    unsafe { asm!("sync", "isync", options(nostack, preserves_flags)) };
+}
+
 pub(crate) use details::*;
 
 /// See docs on [crate::clear_cache] for a description of what this function is trying to do.
@@ -181,5 +226,7 @@ pub(crate) fn clear_cache(_ptr: *const c_void, _len: usize) -> Result<()> {
     aarch64_flush_icache(_ptr as u64, (_ptr as u64) + (_len as u64));
     #[cfg(all(target_arch = "riscv64", target_os = "linux"))]
     riscv_flush_icache(_ptr as u64, (_ptr as u64) + (_len as u64))?;
+    #[cfg(target_arch = "powerpc64")]
+    ppc64_flush_icache(_ptr as u64, (_ptr as u64) + (_len as u64));
     Ok(())
 }

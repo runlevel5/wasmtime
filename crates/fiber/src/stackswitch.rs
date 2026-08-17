@@ -35,6 +35,11 @@ cfg_select! {
         pub(crate) use supported::*;
         pub(crate) use riscv64::*;
     }
+    target_arch = "powerpc64" => {
+        mod ppc64;
+        pub(crate) use supported::*;
+        pub(crate) use ppc64::*;
+    }
     all(target_arch = "riscv32", not(target_feature = "f"), not(target_feature = "v")) => {
         mod riscv32imac;
         pub(crate) use supported::*;

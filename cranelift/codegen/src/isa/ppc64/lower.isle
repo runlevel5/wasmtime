@@ -388,6 +388,54 @@
         (_ Unit (emit_side_effect (SideEffectNoResult.Inst (MInst.CallInd info)))))
     output))
 
+;;;; Rules for `try_call` and `try_call_indirect` ;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;; Direct call to an in-range function.
+(rule 1 (lower_branch (try_call (func_ref_data sig_ref name (RelocDistance.Near) patchable) args et) targets)
+  (let ((abi Sig (abi_sig sig_ref))
+        (trycall OptionTryCallInfo (try_call_info et targets))
+        (uses CallArgList (gen_call_args abi args))
+        (defs CallRetList (gen_try_call_rets abi))
+        (info BoxCallInfo (gen_call_info abi name uses defs trycall patchable)))
+    (emit_side_effect (SideEffectNoResult.Inst (MInst.Call info)))))
+
+;; Direct call to an out-of-range function, via its absolute address.
+(rule (lower_branch (try_call (func_ref_data sig_ref name dist false) args et) targets)
+  (let ((abi Sig (abi_sig sig_ref))
+        (trycall OptionTryCallInfo (try_call_info et targets))
+        (uses CallArgList (gen_call_args abi args))
+        (defs CallRetList (gen_try_call_rets abi))
+        (target Reg (load_ext_name name 0))
+        (info BoxCallIndInfo (gen_call_ind_info abi target uses defs trycall)))
+    (emit_side_effect (SideEffectNoResult.Inst (MInst.CallInd info)))))
+
+;; Indirect call.
+(rule (lower_branch (try_call_indirect ptr args et) targets)
+  (if-let (exception_sig sig_ref) et)
+  (let ((abi Sig (abi_sig sig_ref))
+        (trycall OptionTryCallInfo (try_call_info et targets))
+        (target Reg (put_in_reg ptr))
+        (uses CallArgList (gen_call_args abi args))
+        (defs CallRetList (gen_try_call_rets abi))
+        (info BoxCallIndInfo (gen_call_ind_info abi target uses defs trycall)))
+    (emit_side_effect (SideEffectNoResult.Inst (MInst.CallInd info)))))
+
+;;;; Rules for `get_{stack,frame}_pointer` and `get_return_address` ;;;;;;;;;
+
+(rule (lower (get_stack_pointer _))
+  (output_reg (ppc_mov_from_preg 1)))
+
+(rule (lower (get_frame_pointer _))
+  (output_reg (ppc_mov_from_preg 31)))
+
+(rule (lower (get_return_address _))
+  (output_reg (read_return_address)))
+
+;;;; Rules for `get_exception_handler_address` ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(rule (lower (get_exception_handler_address _ block (u64_from_imm64 idx)))
+  (output_reg (ppc_label_address (block_exn_successor_label block idx))))
+
 ;; Load the absolute address of an external symbol.
 (decl load_ext_name (ExternalName i64) Reg)
 (extern constructor load_ext_name load_ext_name)

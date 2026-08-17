@@ -4753,6 +4753,23 @@ fn detect_host_feature(feature: &str) -> Option<bool> {
         };
     }
 
+    // There is no `is_powerpc_feature_detected`, so read the auxiliary
+    // vector directly, mirroring what `cranelift-native` does.
+    #[cfg(all(target_arch = "powerpc64", target_os = "linux"))]
+    {
+        // From the kernel's <asm/cputable.h>.
+        const PPC_FEATURE2_ARCH_3_00: libc::c_ulong = 0x0080_0000;
+        const PPC_FEATURE2_ARCH_3_1: libc::c_ulong = 0x0004_0000;
+
+        let hwcap2 = unsafe { libc::getauxval(libc::AT_HWCAP2) };
+        return match feature {
+            "isa_3_0" => Some(hwcap2 & PPC_FEATURE2_ARCH_3_00 != 0),
+            "isa_3_1" => Some(hwcap2 & PPC_FEATURE2_ARCH_3_1 != 0),
+
+            _ => None,
+        };
+    }
+
     #[cfg(target_arch = "x86_64")]
     {
         return match feature {

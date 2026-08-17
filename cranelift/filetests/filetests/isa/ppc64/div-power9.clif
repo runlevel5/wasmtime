@@ -20,7 +20,7 @@ block0(v0: i64, v1: i64):
 ;   ori r5, r3, 0
 ;   cmpdi r4, 0
 ;   bne 0x10
-;   trap ; trap: int_divz
+;   .byte 0x00, 0x00, 0x00, 0x00 ; trap: int_divz
 ;   cmpdi r4, -1
 ;   bne 0x20
 ;   li r3, 0
@@ -45,7 +45,7 @@ block0(v0: i64, v1: i64):
 ;   ori r5, r3, 0
 ;   cmpdi r4, 0
 ;   bne 0x10
-;   trap ; trap: int_divz
+;   .byte 0x00, 0x00, 0x00, 0x00 ; trap: int_divz
 ;   modud r3, r5, r4
 ;   blr
 

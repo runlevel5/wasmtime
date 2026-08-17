@@ -12,7 +12,6 @@ use crate::ir::{
 };
 use crate::isa::ppc64::Ppc64Backend;
 use crate::isa::ppc64::inst::*;
-use crate::isa::unwind::UnwindInst;
 use crate::machinst::{
     ArgPair, CallArgList, CallInfo, CallRetList, InstOutput, MachInst, Reg, RetPair,
     VCodeConstant, VCodeConstantData, isle::*,
@@ -158,6 +157,17 @@ impl generated_code::Context for Ppc64IsleContext<'_, '_, MInst, Ppc64Backend> {
             .sized_stackslot_addr(slot, i64::from(offset) as u32, result);
         self.emit(&i);
         result.to_reg()
+    }
+
+    fn read_return_address(&mut self) -> Reg {
+        let dst = self.temp_writable_reg(I64);
+        self.lower_ctx.emit(MInst::gen_load(
+            dst,
+            AMode::FPOffset(8),
+            I64,
+            MemFlagsData::trusted(),
+        ));
+        dst.to_reg()
     }
 
     fn load_ext_name(&mut self, name: ExternalName, offset: i64) -> Reg {

@@ -194,7 +194,9 @@ fn ppc64_get_operands(inst: &mut Inst, collector: &mut impl OperandVisitor) {
                 try_call_info.collect_operands(collector);
             }
         }
-        Inst::LoadExtName { rd, .. } => collector.reg_def(rd),
+        Inst::LoadExtName { rd, .. }
+        | Inst::LabelAddress { rd, .. }
+        | Inst::MovFromPReg { rd, .. } => collector.reg_def(rd),
         Inst::Mflr { rd } => collector.reg_def(rd),
         Inst::Mtlr { rs } => collector.reg_use(rs),
         Inst::Unwind { .. } => {}
@@ -206,8 +208,10 @@ impl MachInst for Inst {
     type LabelUse = LabelUse;
     type ABIMachineSpec = Ppc64MachineDeps;
 
-    /// `trap` (`tw 31,0,0`), little-endian.
-    const TRAP_OPCODE: &'static [u8] = &[0x08, 0x00, 0xE0, 0x7F];
+    /// The all-zeros word: permanently invalid, raises SIGILL (which
+    /// Wasmtime's signal handler listens for, unlike the SIGTRAP that the
+    /// `trap` instruction would raise).
+    const TRAP_OPCODE: &'static [u8] = &[0; 4];
 
     fn gen_dummy_use(reg: Reg) -> Self {
         Inst::DummyUse { reg }
@@ -567,6 +571,14 @@ impl Inst {
             Inst::LoadExtName { rd, name, offset } => {
                 format!("load_ext_name {}, {name:?}+{offset}", wreg(*rd))
             }
+            Inst::MovFromPReg { rd, rm } => format!(
+                "mr {}, {}",
+                wreg(*rd),
+                if *rm == 1 { "sp" } else { "fp" }
+            ),
+            Inst::LabelAddress { rd, label } => {
+                format!("label_address {}, {label:?}", wreg(*rd))
+            }
             Inst::Mflr { rd } => format!("mflr {}", wreg(*rd)),
             Inst::Mtlr { rs } => format!("mtlr {}", reg(*rs)),
             Inst::Unwind { inst } => format!("unwind {inst:?}"),
@@ -587,6 +599,10 @@ pub enum LabelUse {
     /// B-form conditional branch (`bc`): 14-bit word offset in bits
     /// 15:2, range ±32 KiB. Promoted to a `b` veneer when out of range.
     Branch16,
+    /// An `addis`/`addi` pair adding a label's offset (relative to the
+    /// instruction 4 bytes before the pair, where a `bcl 20,31,$+4;
+    /// mflr` sequence read the PC) to a register. Range ±2 GiB.
+    PCRelHiLo,
 }
 
 impl MachInstLabelUse for LabelUse {
@@ -597,6 +613,7 @@ impl MachInstLabelUse for LabelUse {
         match self {
             LabelUse::Branch26 => (1 << 25) - 4,
             LabelUse::Branch16 => (1 << 15) - 4,
+            LabelUse::PCRelHiLo => i32::MAX as CodeOffset - 4,
         }
     }
 
@@ -604,11 +621,15 @@ impl MachInstLabelUse for LabelUse {
         match self {
             LabelUse::Branch26 => 1 << 25,
             LabelUse::Branch16 => 1 << 15,
+            LabelUse::PCRelHiLo => 1 << 31,
         }
     }
 
     fn patch_size(self) -> CodeOffset {
-        4
+        match self {
+            LabelUse::PCRelHiLo => 8,
+            _ => 4,
+        }
     }
 
     fn patch(self, buffer: &mut [u8], use_offset: CodeOffset, label_offset: CodeOffset) {
@@ -617,10 +638,25 @@ impl MachInstLabelUse for LabelUse {
             offset >= -(self.max_neg_range() as i64) && offset <= (self.max_pos_range() as i64)
         );
         debug_assert_eq!(offset & 3, 0);
+        if self == LabelUse::PCRelHiLo {
+            // The pair sits 4 bytes after the `mflr` whose value it
+            // adjusts, so the delta is relative to use_offset - 4. Split
+            // into a high-adjusted/low pair such that
+            // (ha << 16) + sign_extend(lo) == delta.
+            let delta = offset + 4;
+            let lo = delta as i16;
+            let ha = ((delta - i64::from(lo)) >> 16) as u16;
+            let addis = u32::from_le_bytes(buffer[0..4].try_into().unwrap());
+            let addi = u32::from_le_bytes(buffer[4..8].try_into().unwrap());
+            buffer[0..4].copy_from_slice(&(addis | u32::from(ha)).to_le_bytes());
+            buffer[4..8].copy_from_slice(&(addi | u32::from(lo as u16)).to_le_bytes());
+            return;
+        }
         let insn = u32::from_le_bytes(buffer[0..4].try_into().unwrap());
         let field_mask = match self {
             LabelUse::Branch26 => 0x03FF_FFFC,
             LabelUse::Branch16 => 0x0000_FFFC,
+            LabelUse::PCRelHiLo => unreachable!(),
         };
         let patched = (insn & !field_mask) | ((offset as u32) & field_mask);
         buffer[0..4].copy_from_slice(&patched.to_le_bytes());
@@ -628,7 +664,7 @@ impl MachInstLabelUse for LabelUse {
 
     fn supports_veneer(self) -> bool {
         match self {
-            LabelUse::Branch26 => false,
+            LabelUse::Branch26 | LabelUse::PCRelHiLo => false,
             LabelUse::Branch16 => true,
         }
     }
@@ -649,7 +685,7 @@ impl MachInstLabelUse for LabelUse {
                 buffer[0..4].copy_from_slice(&enc_b(0, false).to_le_bytes());
                 (veneer_offset, LabelUse::Branch26)
             }
-            LabelUse::Branch26 => unreachable!(),
+            LabelUse::Branch26 | LabelUse::PCRelHiLo => unreachable!(),
         }
     }
 

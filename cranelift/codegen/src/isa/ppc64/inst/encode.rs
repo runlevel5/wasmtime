@@ -180,8 +180,13 @@ pub(crate) fn enc_bctr(lk: bool) -> u32 {
 /// branch-predictor's link stack on modern cores.
 pub(crate) const BCL_20_31_PLUS4: u32 = (16 << 26) | (20 << 21) | (31 << 16) | 4 | 1;
 
-/// The unconditional trap: `tw 31,0,0` (`trap` extended mnemonic).
-pub(crate) const TRAP_INSTRUCTION: u32 = (31 << 26) | (31 << 21) | (4 << 1);
+/// The unconditional trap: an all-zeros word, which the Power ISA
+/// permanently reserves as an invalid instruction. This raises SIGILL,
+/// which Wasmtime's signal handler listens for; the architecturally
+/// cleaner `tw 31,0,0` (`trap`) raises SIGTRAP, which it does not. The
+/// kernel delivers the signal with NIP pointing at the faulting word, so
+/// no address correction is needed (unlike s390x).
+pub(crate) const TRAP_INSTRUCTION: u32 = 0;
 
 /// A no-op: `ori r0, r0, 0`.
 pub(crate) const NOP_INSTRUCTION: u32 = 24 << 26;
@@ -212,7 +217,6 @@ mod tests {
         assert_eq!(enc_blr(), 0x4E80_0020); // blr
         assert_eq!(enc_bctr(true), 0x4E80_0421); // bctrl
         assert_eq!(BCL_20_31_PLUS4, 0x429F_0005); // bcl 20,31,$+4
-        assert_eq!(TRAP_INSTRUCTION, 0x7FE0_0008); // trap
         assert_eq!(enc_b(8, false), 0x4800_0008); // b $+8
         assert_eq!(enc_b(-4, true), 0x4BFF_FFFD); // bl $-4
         assert_eq!(enc_fmr(1, 2), 0xFC20_1090); // fmr f1, f2

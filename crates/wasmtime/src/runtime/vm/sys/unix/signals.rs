@@ -315,6 +315,19 @@ unsafe fn get_trap_registers(cx: *mut libc::c_void, _signum: libc::c_int) -> Tra
                 fp: cx.uc_mcontext.__gregs[libc::REG_S0] as usize,
             }
         }
+        all(target_os = "linux", target_arch = "powerpc64") => {
+            // `gp_regs` follows the kernel's `pt_regs` layout: the GPRs in
+            // slots 0-31, then NIP in slot 32. Wasmtime's ppc64 backend
+            // uses r31 as the frame pointer. Traps are the permanently
+            // invalid all-zeros word, so they arrive as SIGILL with NIP
+            // pointing at the faulting word (no correction needed, unlike
+            // s390x).
+            let cx = unsafe { &*(cx as *const libc::ucontext_t) };
+            TrapRegisters {
+                pc: cx.uc_mcontext.gp_regs[32] as usize,
+                fp: cx.uc_mcontext.gp_regs[31] as usize,
+            }
+        }
         all(target_os = "freebsd", target_arch = "aarch64") => {
             let cx = unsafe { &*(cx as *const libc::ucontext_t) };
             TrapRegisters {
@@ -423,6 +436,17 @@ unsafe fn store_handler_in_ucontext(cx: *mut libc::c_void, handler: &Handler) {
             cx.uc_mcontext.__gregs[libc::REG_SP] = handler.sp as _;
             cx.uc_mcontext.__gregs[libc::REG_A0] = 0;
             cx.uc_mcontext.__gregs[libc::REG_A0 + 1] = 0;
+        }
+        all(target_os = "linux", target_arch = "powerpc64") => {
+            // Slot 32 of `gp_regs` is NIP; r1 is the stack pointer, r31
+            // the frame pointer, and r3/r4 the exception payload
+            // registers of the tail calling convention.
+            let cx = unsafe { cx.cast::<libc::ucontext_t>().as_mut().unwrap() };
+            cx.uc_mcontext.gp_regs[32] = handler.pc as _;
+            cx.uc_mcontext.gp_regs[1] = handler.sp as _;
+            cx.uc_mcontext.gp_regs[31] = handler.fp as _;
+            cx.uc_mcontext.gp_regs[3] = 0;
+            cx.uc_mcontext.gp_regs[4] = 0;
         }
         _ => {
             compile_error!("unsupported platform");

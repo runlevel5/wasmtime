@@ -20,14 +20,14 @@ fn main() {
     // Determine if the current host architecture is supported by Cranelift
     // meaning that we might be executing native code.
     let has_host_compiler_backend = match target_arch.as_str() {
-        "x86_64" | "riscv64" | "s390x" | "aarch64" => true,
+        "x86_64" | "riscv64" | "s390x" | "aarch64" | "powerpc64" => true,
         _ => false,
     };
 
     // Determine if builtin stack-switching routines are provided for the
     // current host architecture by `wasmtime-internal-fiber`.
     let has_builtin_stackswitch = match target_arch.as_str() {
-        "aarch64" | "x86_64" | "x86" | "arm" | "s390x" | "riscv64" => true,
+        "aarch64" | "x86_64" | "x86" | "arm" | "s390x" | "riscv64" | "powerpc64" => true,
         "riscv32" => std::env::var("CARGO_CFG_TARGET_FEATURE")
             .unwrap()
             .split(',')

@@ -22,14 +22,14 @@ block0(v0: i64, v1: i64):
 ;   ori r5, r3, 0
 ;   cmpdi r4, 0
 ;   bne 0x10
-;   trap ; trap: int_divz
+;   .byte 0x00, 0x00, 0x00, 0x00 ; trap: int_divz
 ;   cmpdi r4, -1
 ;   bne 0x34
 ;   lis r0, -0x8000
 ;   sldi r0, r0, 0x20
 ;   cmpd r5, r0
 ;   bne 0x2c
-;   trap ; trap: int_ovf
+;   .byte 0x00, 0x00, 0x00, 0x00 ; trap: int_ovf
 ;   neg r3, r5
 ;   b 0x38
 ;   divd r3, r5, r4
@@ -52,7 +52,7 @@ block0(v0: i64, v1: i64):
 ;   ori r5, r3, 0
 ;   cmpdi r4, 0
 ;   bne 0x10
-;   trap ; trap: int_divz
+;   .byte 0x00, 0x00, 0x00, 0x00 ; trap: int_divz
 ;   divdu r3, r5, r4
 ;   blr
 
@@ -73,7 +73,7 @@ block0(v0: i64, v1: i64):
 ;   ori r5, r3, 0
 ;   cmpdi r4, 0
 ;   bne 0x10
-;   trap ; trap: int_divz
+;   .byte 0x00, 0x00, 0x00, 0x00 ; trap: int_divz
 ;   cmpdi r4, -1
 ;   bne 0x20
 ;   li r3, 0
@@ -100,7 +100,7 @@ block0(v0: i64, v1: i64):
 ;   ori r5, r3, 0
 ;   cmpdi r4, 0
 ;   bne 0x10
-;   trap ; trap: int_divz
+;   .byte 0x00, 0x00, 0x00, 0x00 ; trap: int_divz
 ;   divdu r0, r5, r4
 ;   mulld r0, r0, r4
 ;   subf r3, r0, r5
@@ -123,13 +123,13 @@ block0(v0: i32, v1: i32):
 ;   ori r5, r3, 0
 ;   cmpwi r4, 0
 ;   bne 0x10
-;   trap ; trap: int_divz
+;   .byte 0x00, 0x00, 0x00, 0x00 ; trap: int_divz
 ;   cmpwi r4, -1
 ;   bne 0x30
 ;   lis r0, -0x8000
 ;   cmpw r5, r0
 ;   bne 0x28
-;   trap ; trap: int_ovf
+;   .byte 0x00, 0x00, 0x00, 0x00 ; trap: int_ovf
 ;   neg r3, r5
 ;   b 0x34
 ;   divw r3, r5, r4

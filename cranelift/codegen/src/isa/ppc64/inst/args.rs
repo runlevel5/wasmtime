@@ -15,7 +15,6 @@ pub enum AMode {
     /// Offset from the stack pointer.
     SPOffset(i64),
     /// Offset from the frame pointer.
-    #[expect(dead_code, reason = "will be used by future lowerings")]
     FPOffset(i64),
     /// Offset into the slot area of the stack, which lies just above the
     /// outgoing argument area that's setup by the function prologue.

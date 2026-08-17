@@ -24,6 +24,10 @@ cfg_select! {
         mod riscv64;
         use riscv64 as imp;
     }
+    target_arch = "powerpc64" => {
+        mod ppc64;
+        use ppc64 as imp;
+    }
     _ => {}
 }
 
@@ -36,6 +40,7 @@ cfg_select! {
         target_arch = "aarch64",
         target_arch = "s390x",
         target_arch = "riscv64",
+        target_arch = "powerpc64",
     ) => {
         /// Get the current stack pointer (at the time this function is
         /// executing). This may be used to check, e.g., approximate space
