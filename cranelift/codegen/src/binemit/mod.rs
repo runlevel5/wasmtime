@@ -42,6 +42,10 @@ pub enum Reloc {
     /// value is sign-extended, multiplied by 4, and added to the PC of
     /// the call instruction to form the destination address.
     Arm64Call,
+    /// ppc64 call target. Encoded as the low 26 bits of an I-form `b`/`bl`
+    /// instruction: a PC-relative signed 24-bit word offset (±32 MiB).
+    /// Corresponds to `R_PPC64_REL24`.
+    Ppc64Call,
     /// s390x PC-relative 4-byte offset
     S390xPCRel32Dbl,
     /// s390x PC-relative 4-byte offset to PLT
@@ -154,7 +158,7 @@ impl fmt::Display for Reloc {
             Self::X86CallPLTRel4 => write!(f, "CallPLTRel4"),
             Self::X86GOTPCRel4 => write!(f, "GOTPCRel4"),
             Self::X86SecRel => write!(f, "SecRel"),
-            Self::Arm32Call | Self::Arm64Call => write!(f, "Call"),
+            Self::Arm32Call | Self::Arm64Call | Self::Ppc64Call => write!(f, "Call"),
             Self::RiscvCallPlt => write!(f, "RiscvCallPlt"),
             Self::RiscvTlsGdHi20 => write!(f, "RiscvTlsGdHi20"),
             Self::RiscvGotHi20 => write!(f, "RiscvGotHi20"),

@@ -1,0 +1,51 @@
+test compile precise-output
+target powerpc64le power9
+
+; ISA 3.0 supplies `modsd`/`modud`, replacing the divide-multiply-subtract
+; sequence used on POWER8.
+function %srem_i64(i64, i64) -> i64 {
+block0(v0: i64, v1: i64):
+    v2 = srem v0, v1
+    return v2
+}
+
+; VCode:
+; block0:
+;   mr r5, r3
+;   srem.i64 r3, r5, r4
+;   blr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   ori r5, r3, 0
+;   cmpdi r4, 0
+;   bne 0x10
+;   trap ; trap: int_divz
+;   cmpdi r4, -1
+;   bne 0x20
+;   li r3, 0
+;   b 0x24
+;   modsd r3, r5, r4
+;   blr
+
+function %urem_i64(i64, i64) -> i64 {
+block0(v0: i64, v1: i64):
+    v2 = urem v0, v1
+    return v2
+}
+
+; VCode:
+; block0:
+;   mr r5, r3
+;   urem.i64 r3, r5, r4
+;   blr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   ori r5, r3, 0
+;   cmpdi r4, 0
+;   bne 0x10
+;   trap ; trap: int_divz
+;   modud r3, r5, r4
+;   blr
+

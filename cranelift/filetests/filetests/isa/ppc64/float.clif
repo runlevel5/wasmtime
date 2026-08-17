@@ -1,0 +1,162 @@
+test compile precise-output
+target powerpc64le
+
+; The single-precision forms differ from the double ones only in primary
+; opcode, and using them is what rounds each f32 result to single precision.
+function %arith_f64(f64, f64) -> f64 {
+block0(v0: f64, v1: f64):
+    v2 = fadd v0, v1
+    v3 = fsub v2, v1
+    v4 = fmul v3, v0
+    v5 = fdiv v4, v1
+    return v5
+}
+
+; VCode:
+; block0:
+;   fadd.f64 f6, f1, f2
+;   fsub.f64 f6, f6, f2
+;   fmul.f64 f6, f6, f1
+;   fdiv.f64 f1, f6, f2
+;   blr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   fadd f6, f1, f2
+;   fsub f6, f6, f2
+;   fmul f6, f6, f1
+;   fdiv f1, f6, f2
+;   blr
+
+function %arith_f32(f32, f32) -> f32 {
+block0(v0: f32, v1: f32):
+    v2 = fadd v0, v1
+    v3 = fmul v2, v1
+    return v3
+}
+
+; VCode:
+; block0:
+;   fadd.f32 f4, f1, f2
+;   fmul.f32 f1, f4, f2
+;   blr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   fadds f4, f1, f2
+;   fmuls f1, f4, f2
+;   blr
+
+function %unary(f64) -> f64 {
+block0(v0: f64):
+    v1 = fneg v0
+    v2 = fabs v1
+    v3 = sqrt v2
+    return v3
+}
+
+; VCode:
+; block0:
+;   fneg.f64 f4, f1
+;   fabs.f64 f4, f4
+;   fsqrt.f64 f1, f4
+;   blr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   fneg f4, f1
+;   fabs f4, f4
+;   fsqrt f1, f4
+;   blr
+
+function %fma_copysign(f64, f64, f64) -> f64 {
+block0(v0: f64, v1: f64, v2: f64):
+    v3 = fma v0, v1, v2
+    v4 = fcopysign v3, v1
+    return v4
+}
+
+; VCode:
+; block0:
+;   fmadd.f64 f5, f1, f2, f3
+;   fcpsgn.f64 f1, f2, f5
+;   blr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   fmadd f5, f1, f2, f3
+;   fcpsgn f1, f2, f5
+;   blr
+
+function %consts() -> f64 {
+block0:
+    v0 = f64const 0x1.5p3
+    v1 = f32const 0x1.0p1
+    v2 = fpromote.f64 v1
+    v3 = fadd v0, v2
+    return v3
+}
+
+; VCode:
+; block0:
+;   load_const r4, 0x4025000000000000
+;   mtvsrd f6, r4
+;   load_const r4, 0x4000000000000000
+;   mtvsrd f7, r4
+;   fmr.f64 f5, f7
+;   fadd.f64 f1, f6, f5
+;   blr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   lis r4, 0x4025
+;   sldi r4, r4, 0x20
+;   mtvsrd f6, r4
+;   lis r4, 0x4000
+;   sldi r4, r4, 0x20
+;   mtvsrd f7, r4
+;   fmr f5, f7
+;   fadd f1, f6, f5
+;   blr
+
+function %promote_demote(f64) -> f64 {
+block0(v0: f64):
+    v1 = fdemote.f32 v0
+    v2 = fpromote.f64 v1
+    return v2
+}
+
+; VCode:
+; block0:
+;   frsp.f32 f3, f1
+;   fmr.f64 f1, f3
+;   blr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   frsp f3, f1
+;   fmr f1, f3
+;   blr
+
+function %bitcast_f64(f64) -> i64 {
+block0(v0: f64):
+    v1 = bitcast.i64 v0
+    v2 = bitcast.f64 v1
+    v3 = bitcast.i64 v2
+    return v3
+}
+
+; VCode:
+; block0:
+;   mfvsrd r4, f1
+;   mtvsrd f4, r4
+;   mfvsrd r3, f4
+;   blr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   mffprd r4, f1
+;   mtvsrd f4, r4
+;   mffprd r3, f4
+;   blr
+

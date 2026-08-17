@@ -1,0 +1,134 @@
+test compile precise-output
+target powerpc64le
+
+function %shl_i64(i64, i64) -> i64 {
+block0(v0: i64, v1: i64):
+    v2 = ishl v0, v1
+    return v2
+}
+
+; VCode:
+; block0:
+;   andi. r4, r4, 63
+;   sld r3, r3, r4
+;   blr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   andi. r4, r4, 0x3f
+;   sld r3, r3, r4
+;   blr
+
+function %shr_i64(i64, i64) -> i64 {
+block0(v0: i64, v1: i64):
+    v2 = ushr v0, v1
+    return v2
+}
+
+; VCode:
+; block0:
+;   andi. r4, r4, 63
+;   srd r3, r3, r4
+;   blr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   andi. r4, r4, 0x3f
+;   srd r3, r3, r4
+;   blr
+
+function %sar_i64(i64, i64) -> i64 {
+block0(v0: i64, v1: i64):
+    v2 = sshr v0, v1
+    return v2
+}
+
+; VCode:
+; block0:
+;   andi. r4, r4, 63
+;   srad r3, r3, r4
+;   blr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   andi. r4, r4, 0x3f
+;   srad r3, r3, r4
+;   blr
+
+function %shl_i32(i32, i32) -> i32 {
+block0(v0: i32, v1: i32):
+    v2 = ishl v0, v1
+    return v2
+}
+
+; VCode:
+; block0:
+;   andi. r4, r4, 31
+;   slw r3, r3, r4
+;   blr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   andi. r4, r4, 0x1f
+;   slw r3, r3, r4
+;   blr
+
+function %shl_const_oversized(i64) -> i64 {
+block0(v0: i64):
+    v1 = iconst.i64 70
+    v2 = ishl v0, v1
+    return v2
+}
+
+; VCode:
+; block0:
+;   load_const r4, 0x6
+;   sld r3, r3, r4
+;   blr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   li r4, 6
+;   sld r3, r3, r4
+;   blr
+
+function %shr_i8(i8, i8) -> i8 {
+block0(v0: i8, v1: i8):
+    v2 = ushr v0, v1
+    return v2
+}
+
+; VCode:
+; block0:
+;   zext.8->64 r3, r3
+;   andi. r5, r4, 7
+;   srw r3, r3, r5
+;   blr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   clrldi r3, r3, 0x38
+;   andi. r5, r4, 7
+;   srw r3, r3, r5
+;   blr
+
+function %sar_i16(i16, i16) -> i16 {
+block0(v0: i16, v1: i16):
+    v2 = sshr v0, v1
+    return v2
+}
+
+; VCode:
+; block0:
+;   sext.16->64 r3, r3
+;   andi. r5, r4, 15
+;   sraw r3, r3, r5
+;   blr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   extsh r3, r3
+;   andi. r5, r4, 0xf
+;   sraw r3, r3, r5
+;   blr
+

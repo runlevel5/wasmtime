@@ -1,0 +1,399 @@
+;; ppc64le instruction selection: CLIF to MachInst lowering.
+;;
+;; Scope so far: integer ALU ops, constants, extensions, shifts, bit
+;; counting, division and remainder, selects, loads/stores, comparisons,
+;; control flow, calls, and traps. Floating point, i128 and vectors are
+;; not yet lowered and fall through to a "cannot lower" error.
+
+;; The main lowering constructor term: takes a clif `Inst` and returns the
+;; register(s) within which the lowered instruction's result values live.
+(decl partial lower (Inst) InstOutput)
+
+;; Branch lowering, with a list of block targets.
+(decl partial lower_branch (Inst MachLabelSlice) Unit)
+
+;;;; Rules for `iconst` ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(rule (lower (iconst ty (u64_from_imm64 n)))
+  (output_reg (imm ty n)))
+
+;;;; Rules for integer ALU ops ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;; `add`/`subf`/logicals operate on the full 64-bit register; for narrower
+;; integer types the low bits are correct and the high bits are allowed to
+;; be garbage, per Cranelift's value conventions.
+(rule (lower (iadd (fits_in_64 (ty_int _)) x y))
+  (output_reg (ppc_add (put_in_reg x) (put_in_reg y))))
+
+(rule (lower (isub (fits_in_64 (ty_int _)) x y))
+  (output_reg (ppc_sub (put_in_reg x) (put_in_reg y))))
+
+(rule (lower (band (fits_in_64 (ty_int _)) x y))
+  (output_reg (ppc_and (put_in_reg x) (put_in_reg y))))
+
+(rule (lower (bor (fits_in_64 (ty_int _)) x y))
+  (output_reg (ppc_or (put_in_reg x) (put_in_reg y))))
+
+(rule (lower (bxor (fits_in_64 (ty_int _)) x y))
+  (output_reg (ppc_xor (put_in_reg x) (put_in_reg y))))
+
+(rule (lower (imul (fits_in_64 (ty_int _)) x y))
+  (output_reg (ppc_mulld (put_in_reg x) (put_in_reg y))))
+
+;; `addi` when one operand is a constant in signed-16-bit range.
+(rule 1 (lower (iadd (fits_in_64 (ty_int _)) x (iconst _ n)))
+  (if-let imm (simm16_from_imm64 n))
+  (output_reg (alu_rr_imm16 (AluImmOp.Addi) (put_in_reg x) imm)))
+
+(rule 2 (lower (iadd (fits_in_64 (ty_int _)) (iconst _ n) y))
+  (if-let imm (simm16_from_imm64 n))
+  (output_reg (alu_rr_imm16 (AluImmOp.Addi) (put_in_reg y) imm)))
+
+;;;; Rules for `ineg` / `bnot` ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(rule (lower (ineg (fits_in_64 (ty_int _)) x))
+  (output_reg (gen_unary (UnaryOp.Neg) (put_in_reg x))))
+
+(rule (lower (bnot (fits_in_64 (ty_int _)) x))
+  (output_reg (gen_unary (UnaryOp.Not) (put_in_reg x))))
+
+;;;; Rules for shifts ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;; Left shifts need no input narrowing: the low bits of the result depend
+;; only on the low bits of the input.
+(rule 1 (lower (ishl $I64 x y))
+  (output_reg (gen_shift (ShiftOp.Sld) (put_in_reg x) (mask_shift_amount y $I64))))
+
+(rule 0 (lower (ishl (fits_in_32 ty) x y))
+  (output_reg (gen_shift (ShiftOp.Slw) (put_in_reg x) (mask_shift_amount y ty))))
+
+;; `srd`/`srad` read the whole register and `srw`/`sraw` read the whole low
+;; word, so i64 and i32 need no narrowing; anything narrower does, since
+;; the bits above the type's width are allowed to be garbage and would
+;; otherwise be shifted into the result.
+(rule 2 (lower (ushr $I64 x y))
+  (output_reg (gen_shift (ShiftOp.Srd) (put_in_reg x) (mask_shift_amount y $I64))))
+
+(rule 1 (lower (ushr $I32 x y))
+  (output_reg (gen_shift (ShiftOp.Srw) (put_in_reg x) (mask_shift_amount y $I32))))
+
+(rule 0 (lower (ushr (fits_in_16 ty) x y))
+  (output_reg
+    (gen_shift (ShiftOp.Srw)
+               (gen_extend (put_in_reg x) false (ty_bits ty) 64)
+               (mask_shift_amount y ty))))
+
+(rule 2 (lower (sshr $I64 x y))
+  (output_reg (gen_shift (ShiftOp.Srad) (put_in_reg x) (mask_shift_amount y $I64))))
+
+(rule 1 (lower (sshr $I32 x y))
+  (output_reg (gen_shift (ShiftOp.Sraw) (put_in_reg x) (mask_shift_amount y $I32))))
+
+(rule 0 (lower (sshr (fits_in_16 ty) x y))
+  (output_reg
+    (gen_shift (ShiftOp.Sraw)
+               (gen_extend (put_in_reg x) true (ty_bits ty) 64)
+               (mask_shift_amount y ty))))
+
+;;;; Rules for bit counting ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(rule (lower (clz (ty_32_or_64 ty) x))
+  (output_reg (gen_bitcount (BitOp.Clz) (put_in_reg x) ty)))
+
+(rule (lower (ctz (ty_32_or_64 ty) x))
+  (output_reg (gen_bitcount (BitOp.Ctz) (put_in_reg x) ty)))
+
+(rule (lower (popcnt (ty_32_or_64 ty) x))
+  (output_reg (gen_bitcount (BitOp.Popcnt) (put_in_reg x) ty)))
+
+;;;; Rules for division and remainder ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(rule (lower (sdiv (ty_32_or_64 ty) x y))
+  (output_reg (gen_divrem (DivOp.SDiv) (put_in_reg x) (put_in_reg y) ty)))
+
+(rule (lower (udiv (ty_32_or_64 ty) x y))
+  (output_reg (gen_divrem (DivOp.UDiv) (put_in_reg x) (put_in_reg y) ty)))
+
+(rule (lower (srem (ty_32_or_64 ty) x y))
+  (output_reg (gen_divrem (DivOp.SRem) (put_in_reg x) (put_in_reg y) ty)))
+
+(rule (lower (urem (ty_32_or_64 ty) x y))
+  (output_reg (gen_divrem (DivOp.URem) (put_in_reg x) (put_in_reg y) ty)))
+
+;;;; Rules for `select` ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;; Fuse an `icmp` condition into the select's compare.
+(rule 1 (lower (select (fits_in_64 (ty_int _))
+                       (maybe_uextend (icmp _ cc a @ (value_type (fits_in_64 in_ty)) b))
+                       x y))
+  (output_reg
+    (gen_select (int_compare cc
+                             (put_in_cmp_reg a cc in_ty)
+                             (put_in_cmp_reg b cc in_ty)
+                             in_ty)
+                (put_in_reg x)
+                (put_in_reg y))))
+
+;; Otherwise test the condition against zero.
+(rule 0 (lower (select (fits_in_64 (ty_int _)) c @ (value_type (fits_in_64 cty)) x y))
+  (output_reg
+    (gen_select (int_compare (IntCC.NotEqual)
+                             (put_in_cmp_reg c (IntCC.NotEqual) cty)
+                             (imm $I64 0)
+                             cty)
+                (put_in_reg x)
+                (put_in_reg y))))
+
+;;;; Rules for floating-point constants ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;; There is no floating-point immediate form, so constants are built in a
+;; GPR and moved across.
+(rule (lower (f64const _ (u64_from_ieee64 n)))
+  (output_reg (mov_to_fpr (imm $I64 n) $F64)))
+
+(rule (lower (f32const _ (u32_from_ieee32 n)))
+  (output_reg (mov_to_fpr (imm $I64 (f32_bits_as_f64 n)) $F32)))
+
+;;;; Rules for floating-point arithmetic ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(rule (lower (fadd (ty_scalar_float ty) x y))
+  (output_reg (fpu_rrr (FpuOp2.Add) (put_in_reg x) (put_in_reg y) ty)))
+
+(rule (lower (fsub (ty_scalar_float ty) x y))
+  (output_reg (fpu_rrr (FpuOp2.Sub) (put_in_reg x) (put_in_reg y) ty)))
+
+(rule (lower (fmul (ty_scalar_float ty) x y))
+  (output_reg (fpu_rrr (FpuOp2.Mul) (put_in_reg x) (put_in_reg y) ty)))
+
+(rule (lower (fdiv (ty_scalar_float ty) x y))
+  (output_reg (fpu_rrr (FpuOp2.Div) (put_in_reg x) (put_in_reg y) ty)))
+
+(rule (lower (fcopysign (ty_scalar_float ty) x y))
+  (output_reg (fpu_rrr (FpuOp2.CopySign) (put_in_reg y) (put_in_reg x) ty)))
+
+(rule (lower (fneg (ty_scalar_float ty) x))
+  (output_reg (fpu_rr (FpuOp1.Neg) (put_in_reg x) ty)))
+
+(rule (lower (fabs (ty_scalar_float ty) x))
+  (output_reg (fpu_rr (FpuOp1.Abs) (put_in_reg x) ty)))
+
+(rule (lower (sqrt (ty_scalar_float ty) x))
+  (output_reg (fpu_rr (FpuOp1.Sqrt) (put_in_reg x) ty)))
+
+(rule (lower (fma (ty_scalar_float ty) x y z))
+  (output_reg (fpu_fma (put_in_reg x) (put_in_reg y) (put_in_reg z) ty)))
+
+;; An `f32` is held in an FPR already widened to double, so widening it is
+;; a plain move; narrowing rounds with `frsp`.
+(rule (lower (fpromote $F64 x))
+  (output_reg (fpu_rr (FpuOp1.Mov) (put_in_reg x) $F64)))
+
+(rule (lower (fdemote $F32 x))
+  (output_reg (fpu_rr (FpuOp1.Demote) (put_in_reg x) $F32)))
+
+;;;; Rules for integer-to-float conversions ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;; A 64-bit source needs no widening; anything narrower is extended to 64
+;; bits first, matching the conversion's signedness, since `fcfid` reads a
+;; full doubleword.
+(rule 1 (lower (fcvt_from_sint (ty_scalar_float out_ty) x @ (value_type $I64)))
+  (output_reg (int_to_fpu (mov_to_fpr (put_in_reg x) $F64) true out_ty)))
+
+(rule 0 (lower (fcvt_from_sint (ty_scalar_float out_ty) x @ (value_type (fits_in_32 in_ty))))
+  (output_reg (gen_int_to_fpu x in_ty true out_ty)))
+
+(rule 1 (lower (fcvt_from_uint (ty_scalar_float out_ty) x @ (value_type $I64)))
+  (output_reg (int_to_fpu (mov_to_fpr (put_in_reg x) $F64) false out_ty)))
+
+(rule 0 (lower (fcvt_from_uint (ty_scalar_float out_ty) x @ (value_type (fits_in_32 in_ty))))
+  (output_reg (gen_int_to_fpu x in_ty false out_ty)))
+
+;;;; Rules for `fcmp` ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(rule (lower (fcmp _ cc x y))
+  (output_reg (fpu_cmp_set (float_compare cc (put_in_reg x) (put_in_reg y)))))
+
+;;;; Rules for `bitcast` ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;; Only the 64-bit transfers are supported: an `f32` is stored widened in
+;; its register, so reinterpreting one as `i32` would mean re-narrowing it.
+(rule (lower (bitcast $I64 _ x @ (value_type $F64)))
+  (output_reg (mov_from_fpr (put_in_reg x))))
+
+(rule (lower (bitcast $F64 _ x @ (value_type $I64)))
+  (output_reg (mov_to_fpr (put_in_reg x) $F64)))
+
+;;;; Rules for `uextend`/`sextend`/`ireduce` ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(rule (lower (uextend out_ty val @ (value_type in_ty)))
+  (output_reg (gen_extend (put_in_reg val) false (ty_bits in_ty) (ty_bits out_ty))))
+
+(rule (lower (sextend out_ty val @ (value_type in_ty)))
+  (output_reg (gen_extend (put_in_reg val) true (ty_bits in_ty) (ty_bits out_ty))))
+
+;; Truncation is a no-op: narrow values live in the low bits.
+(rule (lower (ireduce _ val))
+  (output_reg (put_in_reg val)))
+
+;;;; Rules for loads ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;; The `little_or_native_endian` extractor is the seam where big-endian
+;; support would slot in: explicitly-BE accesses have no rules yet.
+(rule (lower (load ty (little_or_native_endian flags) addr offset))
+  (output_reg (gen_load ty (amode addr offset) flags)))
+
+;; Extending loads: PPC has zero-extending loads natively (lbz/lhz/lwz);
+;; use them and extend as required.
+(rule (lower (uload8 _ (little_or_native_endian flags) addr offset))
+  (output_reg (gen_load $I8 (amode addr offset) flags)))
+(rule (lower (uload16 _ (little_or_native_endian flags) addr offset))
+  (output_reg (gen_load $I16 (amode addr offset) flags)))
+(rule (lower (uload32 _ (little_or_native_endian flags) addr offset))
+  (output_reg (gen_load $I32 (amode addr offset) flags)))
+
+(rule (lower (sload8 _ (little_or_native_endian flags) addr offset))
+  (output_reg (gen_extend (gen_load $I8 (amode addr offset) flags) true 8 64)))
+(rule (lower (sload16 _ (little_or_native_endian flags) addr offset))
+  (output_reg (gen_extend (gen_load $I16 (amode addr offset) flags) true 16 64)))
+(rule (lower (sload32 _ (little_or_native_endian flags) addr offset))
+  (output_reg (gen_extend (gen_load $I32 (amode addr offset) flags) true 32 64)))
+
+;;;; Rules for stores ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(rule (lower (store (little_or_native_endian flags) val @ (value_type ty) addr offset))
+  (side_effect (gen_store ty (amode addr offset) flags (put_in_reg val))))
+
+(rule (lower (istore8 (little_or_native_endian flags) val addr offset))
+  (side_effect (gen_store $I8 (amode addr offset) flags (put_in_reg val))))
+(rule (lower (istore16 (little_or_native_endian flags) val addr offset))
+  (side_effect (gen_store $I16 (amode addr offset) flags (put_in_reg val))))
+(rule (lower (istore32 (little_or_native_endian flags) val addr offset))
+  (side_effect (gen_store $I32 (amode addr offset) flags (put_in_reg val))))
+
+;;;; Rules for `icmp` ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;; `cmpw`/`cmpd` (and unsigned variants) handle 32- and 64-bit inputs
+;; regardless of upper-bit garbage; 8/16-bit inputs must be extended
+;; first, matching the comparison's signedness.
+(decl put_in_cmp_reg (Value IntCC Type) Reg)
+(rule 1 (put_in_cmp_reg val cc (fits_in_16 ty))
+  (gen_extend (put_in_reg val) (cc_is_signed cc) (ty_bits ty) 64))
+(rule 0 (put_in_cmp_reg val _ $I32) (put_in_reg val))
+(rule 0 (put_in_cmp_reg val _ $I64) (put_in_reg val))
+
+(decl cc_is_signed (IntCC) bool)
+(extern constructor cc_is_signed cc_is_signed)
+
+(rule (lower (icmp _ cc x @ (value_type (fits_in_64 in_ty)) y))
+  (output_reg
+    (cmp_set (int_compare cc
+                          (put_in_cmp_reg x cc in_ty)
+                          (put_in_cmp_reg y cc in_ty)
+                          in_ty))))
+
+;;;; Rules for branches ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(rule (lower_branch (jump _) (single_target label))
+  (emit_side_effect (ppc_jump label)))
+
+;; brif on an icmp: fuse compare and branch.
+(rule 1 (lower_branch (brif (maybe_uextend (icmp _ cc x @ (value_type (fits_in_64 in_ty)) y)) _ _)
+                      (two_targets taken not_taken))
+  (emit_side_effect
+    (ppc_cond_br (int_compare cc
+                              (put_in_cmp_reg x cc in_ty)
+                              (put_in_cmp_reg y cc in_ty)
+                              in_ty)
+                 taken not_taken)))
+
+;; brif on an fcmp: fuse compare and branch.
+(rule 2 (lower_branch (brif (maybe_uextend (fcmp _ cc x y)) _ _)
+                      (two_targets taken not_taken))
+  (emit_side_effect
+    (fpu_cond_br (float_compare cc (put_in_reg x) (put_in_reg y)) taken not_taken)))
+
+;; brif on a general boolean value: compare against zero.
+(rule 0 (lower_branch (brif val @ (value_type (fits_in_64 ty)) _ _)
+                      (two_targets taken not_taken))
+  (emit_side_effect
+    (ppc_cond_br (int_compare (IntCC.NotEqual)
+                              (put_in_cmp_reg val (IntCC.NotEqual) ty)
+                              (imm $I64 0)
+                              ty)
+                 taken not_taken)))
+
+;;;; Rules for `stack_addr` ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(rule (lower (stack_addr _ ss offset))
+  (output_reg (gen_stack_addr ss offset)))
+
+;;;; Rules for traps ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(rule (lower (trap code))
+  (side_effect (SideEffectNoResult.Inst (MInst.Udf code))))
+
+(rule (lower (trapz val @ (value_type (fits_in_64 ty)) code))
+  (side_effect
+    (gen_trapif (int_compare (IntCC.Equal)
+                             (put_in_cmp_reg val (IntCC.Equal) ty)
+                             (imm $I64 0)
+                             ty)
+                code)))
+
+(rule (lower (trapnz val @ (value_type (fits_in_64 ty)) code))
+  (side_effect
+    (gen_trapif (int_compare (IntCC.NotEqual)
+                             (put_in_cmp_reg val (IntCC.NotEqual) ty)
+                             (imm $I64 0)
+                             ty)
+                code)))
+
+;;;; Rules for `return` ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;; N.B.: the Ret itself is generated by the ABI.
+(rule (lower (return args))
+  (lower_return args))
+
+;;;; Rules for calls ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;; Direct call to an in-range function.
+(rule 1 (lower (call (func_ref_data sig_ref name (RelocDistance.Near) patchable) args))
+  (let ((output ValueRegsVec (gen_call_output sig_ref))
+        (abi Sig (abi_sig sig_ref))
+        (uses CallArgList (gen_call_args abi args))
+        (defs CallRetList (gen_call_rets abi output))
+        (info BoxCallInfo (gen_call_info abi name uses defs (try_call_none) patchable))
+        (_ Unit (emit_side_effect (SideEffectNoResult.Inst (MInst.Call info)))))
+    output))
+
+;; Direct call to an out-of-range function, via its absolute address.
+(rule (lower (call (func_ref_data sig_ref name dist false) args))
+  (let ((output ValueRegsVec (gen_call_output sig_ref))
+        (abi Sig (abi_sig sig_ref))
+        (uses CallArgList (gen_call_args abi args))
+        (defs CallRetList (gen_call_rets abi output))
+        (target Reg (load_ext_name name 0))
+        (info BoxCallIndInfo (gen_call_ind_info abi target uses defs (try_call_none)))
+        (_ Unit (emit_side_effect (SideEffectNoResult.Inst (MInst.CallInd info)))))
+    output))
+
+;; Indirect call.
+(rule (lower (call_indirect sig_ref ptr args))
+  (let ((output ValueRegsVec (gen_call_output sig_ref))
+        (abi Sig (abi_sig sig_ref))
+        (target Reg (put_in_reg ptr))
+        (uses CallArgList (gen_call_args abi args))
+        (defs CallRetList (gen_call_rets abi output))
+        (info BoxCallIndInfo (gen_call_ind_info abi target uses defs (try_call_none)))
+        (_ Unit (emit_side_effect (SideEffectNoResult.Inst (MInst.CallInd info)))))
+    output))
+
+;; Load the absolute address of an external symbol.
+(decl load_ext_name (ExternalName i64) Reg)
+(extern constructor load_ext_name load_ext_name)
+
+(rule (lower (func_addr _ (func_ref_data _ name _ _)))
+  (output_reg (load_ext_name name 0)))
+
+(rule (lower (symbol_value _ (symbol_value_data name _ offset)))
+  (output_reg (load_ext_name name offset)))

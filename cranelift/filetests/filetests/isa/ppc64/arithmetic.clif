@@ -1,0 +1,103 @@
+test compile precise-output
+target powerpc64le
+
+function %add_i64(i64, i64) -> i64 {
+block0(v0: i64, v1: i64):
+    v2 = iadd v0, v1
+    return v2
+}
+
+; VCode:
+; block0:
+;   add r3, r3, r4
+;   blr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   add r3, r3, r4
+;   blr
+
+function %sub_i64(i64, i64) -> i64 {
+block0(v0: i64, v1: i64):
+    v2 = isub v0, v1
+    return v2
+}
+
+; VCode:
+; block0:
+;   sub r3, r3, r4
+;   blr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   subf r3, r4, r3
+;   blr
+
+function %mul_i64(i64, i64) -> i64 {
+block0(v0: i64, v1: i64):
+    v2 = imul v0, v1
+    return v2
+}
+
+; VCode:
+; block0:
+;   mulld r3, r3, r4
+;   blr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   mulld r3, r3, r4
+;   blr
+
+function %logic(i64, i64) -> i64 {
+block0(v0: i64, v1: i64):
+    v2 = band v0, v1
+    v3 = bor v2, v1
+    v4 = bxor v3, v0
+    return v4
+}
+
+; VCode:
+; block0:
+;   and r5, r3, r4
+;   or r5, r5, r4
+;   xor r3, r5, r3
+;   blr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   and r5, r3, r4
+;   or r5, r5, r4
+;   xor r3, r5, r3
+;   blr
+
+function %iconst_various() -> i64 {
+block0:
+    v0 = iconst.i64 42
+    v1 = iconst.i64 0x7fff_0000
+    v2 = iconst.i64 0x1234_5678_9abc_def0
+    v3 = iadd v0, v1
+    v4 = iadd v3, v2
+    return v4
+}
+
+; VCode:
+; block0:
+;   load_const r3, 0x7fff0000
+;   load_const r4, 0x123456789abcdef0
+;   addi r3, r3, 42
+;   add r3, r3, r4
+;   blr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   lis r3, 0x7fff
+;   lis r4, 0x1234
+;   ori r4, r4, 0x5678
+;   sldi r4, r4, 0x20
+;   oris r4, r4, 0x9abc
+;   ori r4, r4, 0xdef0
+;   addi r3, r3, 0x2a
+;   add r3, r3, r4
+;   blr
+

@@ -1,0 +1,81 @@
+test compile precise-output
+target powerpc64le
+
+function %br_icmp(i64, i64) -> i64 {
+block0(v0: i64, v1: i64):
+    v2 = icmp slt v0, v1
+    brif v2, block1, block2
+block1:
+    return v0
+block2:
+    return v1
+}
+
+; VCode:
+; block0:
+;   bslt.d r3, r4 # MachLabel(2), MachLabel(1)
+; block1:
+;   mr r3, r4
+;   blr
+; block2:
+;   blr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   cmpd r3, r4
+;   blt 0x10
+; block1: ; offset 0x8
+;   ori r3, r4, 0
+;   blr
+; block2: ; offset 0x10
+;   blr
+
+function %icmp_value(i32, i32) -> i8 {
+block0(v0: i32, v1: i32):
+    v2 = icmp ult v0, v1
+    return v2
+}
+
+; VCode:
+; block0:
+;   cmp_set.ult r3, r3, r4
+;   blr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   cmplw r3, r4
+;   li r3, 1
+;   li r0, 0
+;   isel r3, r3, r0, cr0lt
+;   blr
+
+function %trap_cond(i64) {
+block0(v0: i64):
+    v1 = iconst.i64 0
+    v2 = icmp eq v0, v1
+    brif v2, block1, block2
+block1:
+    trap user1
+block2:
+    return
+}
+
+; VCode:
+; block0:
+;   load_const r4, 0x0
+;   beq.d r3, r4 # MachLabel(2), MachLabel(1)
+; block1:
+;   blr
+; block2:
+;   trap # user1
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   li r4, 0
+;   cmpld r3, r4
+;   beq 0x10
+; block1: ; offset 0xc
+;   blr
+; block2: ; offset 0x10
+;   trap ; trap: user1
+

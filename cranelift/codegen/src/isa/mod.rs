@@ -76,6 +76,9 @@ pub mod riscv64;
 #[cfg(feature = "s390x")]
 mod s390x;
 
+#[cfg(feature = "ppc64")]
+mod ppc64;
+
 #[cfg(feature = "pulley")]
 mod pulley32;
 #[cfg(feature = "pulley")]
@@ -112,6 +115,10 @@ pub fn lookup(triple: Triple) -> Result<Builder, LookupError> {
         }
         Architecture::Aarch64 { .. } => isa_builder!(aarch64, (feature = "arm64"), triple),
         Architecture::S390x { .. } => isa_builder!(s390x, (feature = "s390x"), triple),
+        // Only little-endian PowerPC is supported for now; big-endian
+        // (`Architecture::Powerpc64`) deliberately falls through to
+        // `Unsupported`.
+        Architecture::Powerpc64le => isa_builder!(ppc64, (feature = "ppc64"), triple),
         Architecture::Riscv64 { .. } => isa_builder!(riscv64, (feature = "riscv64"), triple),
         Architecture::Pulley32 | Architecture::Pulley32be => {
             isa_builder!(pulley32, (feature = "pulley"), triple)

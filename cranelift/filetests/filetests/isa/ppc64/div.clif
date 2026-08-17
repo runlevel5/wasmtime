@@ -1,0 +1,137 @@
+test compile precise-output
+target powerpc64le
+
+; PPC's divide instructions leave the result undefined rather than trapping,
+; so the divide-by-zero check and the signed INT_MIN / -1 overflow check are
+; emitted explicitly. The -1 divisor is special-cased because it is the only
+; divisor for which the hardware result is unusable.
+function %sdiv_i64(i64, i64) -> i64 {
+block0(v0: i64, v1: i64):
+    v2 = sdiv v0, v1
+    return v2
+}
+
+; VCode:
+; block0:
+;   mr r5, r3
+;   sdiv.i64 r3, r5, r4
+;   blr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   ori r5, r3, 0
+;   cmpdi r4, 0
+;   bne 0x10
+;   trap ; trap: int_divz
+;   cmpdi r4, -1
+;   bne 0x34
+;   lis r0, -0x8000
+;   sldi r0, r0, 0x20
+;   cmpd r5, r0
+;   bne 0x2c
+;   trap ; trap: int_ovf
+;   neg r3, r5
+;   b 0x38
+;   divd r3, r5, r4
+;   blr
+
+function %udiv_i64(i64, i64) -> i64 {
+block0(v0: i64, v1: i64):
+    v2 = udiv v0, v1
+    return v2
+}
+
+; VCode:
+; block0:
+;   mr r5, r3
+;   udiv.i64 r3, r5, r4
+;   blr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   ori r5, r3, 0
+;   cmpdi r4, 0
+;   bne 0x10
+;   trap ; trap: int_divz
+;   divdu r3, r5, r4
+;   blr
+
+function %srem_i64(i64, i64) -> i64 {
+block0(v0: i64, v1: i64):
+    v2 = srem v0, v1
+    return v2
+}
+
+; VCode:
+; block0:
+;   mr r5, r3
+;   srem.i64 r3, r5, r4
+;   blr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   ori r5, r3, 0
+;   cmpdi r4, 0
+;   bne 0x10
+;   trap ; trap: int_divz
+;   cmpdi r4, -1
+;   bne 0x20
+;   li r3, 0
+;   b 0x2c
+;   divd r0, r5, r4
+;   mulld r0, r0, r4
+;   subf r3, r0, r5
+;   blr
+
+function %urem_i64(i64, i64) -> i64 {
+block0(v0: i64, v1: i64):
+    v2 = urem v0, v1
+    return v2
+}
+
+; VCode:
+; block0:
+;   mr r5, r3
+;   urem.i64 r3, r5, r4
+;   blr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   ori r5, r3, 0
+;   cmpdi r4, 0
+;   bne 0x10
+;   trap ; trap: int_divz
+;   divdu r0, r5, r4
+;   mulld r0, r0, r4
+;   subf r3, r0, r5
+;   blr
+
+function %sdiv_i32(i32, i32) -> i32 {
+block0(v0: i32, v1: i32):
+    v2 = sdiv v0, v1
+    return v2
+}
+
+; VCode:
+; block0:
+;   mr r5, r3
+;   sdiv.i32 r3, r5, r4
+;   blr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   ori r5, r3, 0
+;   cmpwi r4, 0
+;   bne 0x10
+;   trap ; trap: int_divz
+;   cmpwi r4, -1
+;   bne 0x30
+;   lis r0, -0x8000
+;   cmpw r5, r0
+;   bne 0x28
+;   trap ; trap: int_ovf
+;   neg r3, r5
+;   b 0x34
+;   divw r3, r5, r4
+;   blr
+

@@ -1,0 +1,825 @@
+//! ppc64 ISA: binary code emission.
+
+use crate::ir;
+use crate::isa::ppc64::abi::Ppc64MachineDeps;
+use crate::isa::ppc64::inst::*;
+use cranelift_control::ControlPlane;
+
+pub struct EmitInfo {
+    #[expect(dead_code, reason = "will gate ISA-3.0 fast paths later")]
+    shared_flags: settings::Flags,
+    isa_flags: crate::isa::ppc64::settings::Flags,
+}
+
+impl EmitInfo {
+    pub(crate) fn new(
+        shared_flags: settings::Flags,
+        isa_flags: crate::isa::ppc64::settings::Flags,
+    ) -> Self {
+        Self {
+            shared_flags,
+            isa_flags,
+        }
+    }
+}
+
+/// State carried between emissions of a sequence of instructions.
+#[derive(Default, Clone, Debug)]
+pub struct EmitState {
+    /// The user stack map for the upcoming instruction, as provided to
+    /// `pre_safepoint()`.
+    user_stack_map: Option<ir::UserStackMap>,
+    ctrl_plane: ControlPlane,
+    frame_layout: FrameLayout,
+}
+
+impl EmitState {
+    fn take_stack_map(&mut self) -> Option<ir::UserStackMap> {
+        self.user_stack_map.take()
+    }
+}
+
+impl MachInstEmitState<Inst> for EmitState {
+    fn new(abi: &Callee<Ppc64MachineDeps>, ctrl_plane: ControlPlane) -> Self {
+        EmitState {
+            user_stack_map: None,
+            ctrl_plane,
+            frame_layout: abi.frame_layout().clone(),
+        }
+    }
+
+    fn pre_safepoint(&mut self, user_stack_map: Option<ir::UserStackMap>) {
+        self.user_stack_map = user_stack_map;
+    }
+
+    fn ctrl_plane_mut(&mut self) -> &mut ControlPlane {
+        &mut self.ctrl_plane
+    }
+
+    fn take_ctrl_plane(self) -> ControlPlane {
+        self.ctrl_plane
+    }
+
+    fn frame_layout(&self) -> &FrameLayout {
+        &self.frame_layout
+    }
+}
+
+impl Inst {
+    /// Produce the shortest instruction sequence that materializes `imm`
+    /// into GPR number `rd`.
+    pub(crate) fn load_constant_words(rd: u32, imm: u64) -> SmallVec<[u32; 5]> {
+        let mut words = SmallVec::new();
+        let val = imm as i64;
+        if let Ok(imm16) = i16::try_from(val) {
+            // li rd, imm16
+            words.push(enc_d(14, rd, 0, imm16 as u16));
+        } else if let Ok(imm32) = i32::try_from(val) {
+            // lis rd, hi; [ori rd, rd, lo]
+            words.push(enc_d(15, rd, 0, (imm32 >> 16) as u16));
+            if imm32 as u16 != 0 {
+                words.push(enc_d_logic(24, rd, rd, imm32 as u16));
+            }
+        } else {
+            // Full 64-bit build: assemble the high 32 bits, shift them
+            // into place (which also discards `lis`'s sign extension),
+            // then OR in the low 32 bits.
+            words.push(enc_d(15, rd, 0, (imm >> 48) as u16)); // lis
+            if (imm >> 32) as u16 != 0 {
+                words.push(enc_d_logic(24, rd, rd, (imm >> 32) as u16)); // ori
+            }
+            words.push(enc_md(rd, rd, 32, 31, 1)); // rldicr rd, rd, 32, 31
+            if (imm >> 16) as u16 != 0 {
+                words.push(enc_d_logic(25, rd, rd, (imm >> 16) as u16)); // oris
+            }
+            if imm as u16 != 0 {
+                words.push(enc_d_logic(24, rd, rd, imm as u16)); // ori
+            }
+        }
+        words
+    }
+}
+
+/// Resolve an AMode and emit the D/DS-form access if the offset fits, or
+/// materialize the offset into r0 and use the X-form indexed variant.
+///
+/// `(d_opcd, ds_xo)` describe the displacement form (`ds_xo` is `Some`
+/// for the 4-aligned DS-forms), `x_xo` the indexed form. `rt` is the
+/// data register.
+fn emit_mem_access(
+    sink: &mut MachBuffer<Inst>,
+    state: &EmitState,
+    mem: AMode,
+    rt: u32,
+    d_opcd: u32,
+    ds_xo: Option<u32>,
+    x_xo: u32,
+) {
+    let (base, offset) = mem.to_base_and_offset(state.frame_layout());
+    let base_n = reg_num(base);
+    debug_assert!(base_n != 0, "r0 is not a valid base register");
+    let fits_d = i16::try_from(offset).is_ok();
+    let ds_ok = ds_xo.is_none() || (offset & 3) == 0;
+    if fits_d && ds_ok {
+        let imm = offset as i16;
+        match ds_xo {
+            Some(xo2) => sink.put4(enc_ds(d_opcd, rt, base_n, imm, xo2)),
+            None => sink.put4(enc_d(d_opcd, rt, base_n, imm as u16)),
+        }
+    } else {
+        // Materialize the offset into r0 and use the indexed form; RB has
+        // no reads-as-zero quirk.
+        for w in Inst::load_constant_words(0, offset as u64) {
+            sink.put4(w);
+        }
+        sink.put4(enc_x(rt, base_n, 0, x_xo));
+    }
+}
+
+impl Inst {
+    /// Expand a division or remainder, including the checks CLIF requires
+    /// but PPC's divide instructions do not perform.
+    ///
+    /// PPC leaves `RT` *undefined* (rather than trapping) when the divisor
+    /// is zero, and likewise for the signed `INT_MIN / -1` overflow, so
+    /// both cases are branched around explicitly. The `-1` divisor is
+    /// special-cased rather than checked-then-divided because it is the
+    /// only value for which the hardware result is unusable: `x / -1` is
+    /// `-x` and `x % -1` is `0` for every `x`.
+    fn emit_divrem(
+        sink: &mut MachBuffer<Inst>,
+        emit_info: &EmitInfo,
+        state: &mut EmitState,
+        op: DivOp,
+        rd: Writable<Reg>,
+        ra: Reg,
+        rb: Reg,
+        ty: Type,
+    ) {
+        let is_64 = ty == I64;
+        let rd_n = reg_num(rd.to_reg());
+        let ra_n = reg_num(ra);
+        let rb_n = reg_num(rb);
+        let signed = matches!(op, DivOp::SDiv | DivOp::SRem);
+
+        // Trap if the divisor is zero.
+        let after_divz = sink.get_label();
+        emit_cmpi(sink, rb_n, 0, is_64);
+        emit_bc_to_label(sink, after_divz, CR0_EQ, false);
+        Inst::Udf {
+            trap_code: ir::TrapCode::INTEGER_DIVISION_BY_ZERO,
+        }
+        .emit(sink, emit_info, state);
+        sink.bind_label(after_divz, &mut state.ctrl_plane);
+
+        let done = sink.get_label();
+
+        if signed {
+            // The `-1` divisor path, which the hardware cannot be trusted
+            // with for the minimum-value dividend.
+            let normal = sink.get_label();
+            emit_cmpi(sink, rb_n, -1, is_64);
+            emit_bc_to_label(sink, normal, CR0_EQ, false);
+
+            match op {
+                DivOp::SDiv => {
+                    // Trap on INT_MIN / -1, otherwise negate.
+                    let min = if is_64 {
+                        0x8000_0000_0000_0000
+                    } else {
+                        0xFFFF_FFFF_8000_0000
+                    };
+                    for w in Inst::load_constant_words(0, min) {
+                        sink.put4(w);
+                    }
+                    let no_ovf = sink.get_label();
+                    sink.put4(enc_cmp(0, u32::from(is_64), ra_n, 0, 0));
+                    emit_bc_to_label(sink, no_ovf, CR0_EQ, false);
+                    Inst::Udf {
+                        trap_code: ir::TrapCode::INTEGER_OVERFLOW,
+                    }
+                    .emit(sink, emit_info, state);
+                    sink.bind_label(no_ovf, &mut state.ctrl_plane);
+                    sink.put4(enc_xo(rd_n, ra_n, 0, 104)); // neg rd, ra
+                }
+                DivOp::SRem => {
+                    sink.put4(enc_d(14, rd_n, 0, 0)); // li rd, 0
+                }
+                _ => unreachable!(),
+            }
+            emit_b_to_label(sink, done);
+            sink.bind_label(normal, &mut state.ctrl_plane);
+        }
+
+        match op {
+            DivOp::SDiv => sink.put4(enc_xo(rd_n, ra_n, rb_n, if is_64 { 489 } else { 491 })),
+            DivOp::UDiv => sink.put4(enc_xo(rd_n, ra_n, rb_n, if is_64 { 457 } else { 459 })),
+            DivOp::SRem | DivOp::URem => {
+                let unsigned = matches!(op, DivOp::URem);
+                if emit_info.isa_flags.has_isa_3_0() {
+                    // The modulo instructions are X-form, with a 10-bit
+                    // extended opcode rather than the divides' 9-bit one.
+                    let xo = match (unsigned, is_64) {
+                        (false, true) => 777,  // modsd
+                        (false, false) => 779, // modsw
+                        (true, true) => 265,   // modud
+                        (true, false) => 267,  // moduw
+                    };
+                    sink.put4(enc_x(rd_n, ra_n, rb_n, xo));
+                } else {
+                    // rd = ra - (ra / rb) * rb, via the r0 scratch.
+                    let div_xo = match (unsigned, is_64) {
+                        (false, true) => 489,
+                        (false, false) => 491,
+                        (true, true) => 457,
+                        (true, false) => 459,
+                    };
+                    sink.put4(enc_xo(0, ra_n, rb_n, div_xo));
+                    sink.put4(enc_xo(0, 0, rb_n, 233)); // mulld r0, r0, rb
+                    sink.put4(enc_xo(rd_n, 0, ra_n, 40)); // subf rd, r0, ra
+                }
+            }
+        }
+
+        sink.bind_label(done, &mut state.ctrl_plane);
+    }
+}
+
+/// Emit `cmpdi`/`cmpwi` of `ra` against a signed 16-bit immediate, into cr0.
+fn emit_cmpi(sink: &mut MachBuffer<Inst>, ra: u32, imm: i16, is_64: bool) {
+    sink.put4(enc_cmpi(11, 0, u32::from(is_64), ra, imm as u16));
+}
+
+/// Emit a `bc` to `label` testing cr0's `bit`; `polarity` selects whether
+/// the branch is taken when the bit is set.
+fn emit_bc_to_label(
+    sink: &mut MachBuffer<Inst>,
+    label: MachLabel,
+    bit: u32,
+    polarity: bool,
+) {
+    let off = sink.cur_offset();
+    sink.use_label_at_offset(off, label, LabelUse::Branch16);
+    sink.put4(enc_bc(bo_for(polarity), bit, 0, false));
+}
+
+/// Emit an unconditional `b` to `label`.
+fn emit_b_to_label(sink: &mut MachBuffer<Inst>, label: MachLabel) {
+    let off = sink.cur_offset();
+    sink.use_label_at_offset(off, label, LabelUse::Branch26);
+    sink.put4(enc_b(0, false));
+}
+
+impl FloatCompare {
+    /// Emit `fcmpu` into cr0, plus the `cror` that some conditions need to
+    /// combine two of its result bits. Returns the cr0 bit to test and the
+    /// polarity for which the condition holds.
+    fn emit_cmp(&self, sink: &mut MachBuffer<Inst>) -> (Option<()>, u32, bool) {
+        sink.put4(enc_x_opcd(63, 0, reg_num(self.rs1), reg_num(self.rs2), 0));
+        let (cror, bit, polarity) = self.cr_plan();
+        if let Some((bt, ba, bb)) = cror {
+            sink.put4(enc_cror(bt, ba, bb));
+        }
+        (cror.map(|_| ()), bit, polarity)
+    }
+}
+
+impl IntegerCompare {
+    /// Emit the `cmp`/`cmpl`/`cmpw`/`cmplw` into cr0.
+    fn emit_cmp(&self, sink: &mut MachBuffer<Inst>) {
+        let l = u32::from(self.is_64);
+        let xo = if self.is_signed() { 0 } else { 32 };
+        sink.put4(enc_cmp(0, l, reg_num(self.rs1), reg_num(self.rs2), xo));
+    }
+
+    /// Encode the `bc` for this comparison with the given byte offset.
+    fn enc_bc(&self, off: i32) -> u32 {
+        let (bit, polarity) = self.bit_and_polarity();
+        enc_bc(bo_for(polarity), bit, off, false)
+    }
+}
+
+impl MachInstEmit for Inst {
+    type State = EmitState;
+    type Info = EmitInfo;
+
+    fn emit(&self, sink: &mut MachBuffer<Inst>, emit_info: &Self::Info, state: &mut EmitState) {
+        let start_off = sink.cur_offset();
+
+        match self {
+            &Inst::Nop0 | &Inst::Args { .. } | &Inst::Rets { .. } | &Inst::DummyUse { .. } => {}
+            &Inst::Nop4 => sink.put4(NOP_INSTRUCTION),
+
+            &Inst::LoadConst64 { rd, imm } => {
+                for w in Inst::load_constant_words(reg_num(rd.to_reg()), imm) {
+                    sink.put4(w);
+                }
+            }
+
+            &Inst::AluRRR { op, rd, ra, rb } => {
+                let rd = reg_num(rd.to_reg());
+                let ra = reg_num(ra);
+                let rb = reg_num(rb);
+                let word = match op {
+                    AluOp::Add => enc_xo(rd, ra, rb, 266),
+                    // subf RT,RA,RB computes RB - RA; swap to get ra - rb.
+                    AluOp::Sub => enc_xo(rd, rb, ra, 40),
+                    AluOp::Mulld => enc_xo(rd, ra, rb, 233),
+                    AluOp::And => enc_x_logic(ra, rd, rb, 28),
+                    AluOp::Or => enc_x_logic(ra, rd, rb, 444),
+                    AluOp::Xor => enc_x_logic(ra, rd, rb, 316),
+                };
+                sink.put4(word);
+            }
+
+            &Inst::AluRRImm16 { op, rd, ra, imm } => {
+                let rd = reg_num(rd.to_reg());
+                let ra_n = reg_num(ra);
+                let word = match op {
+                    // addi with RA=0 would mean "literal zero"; the
+                    // lowering rules never produce that because r0 is not
+                    // allocatable.
+                    AluImmOp::Addi => {
+                        debug_assert!(ra_n != 0);
+                        enc_d(14, rd, ra_n, imm)
+                    }
+                    AluImmOp::Andi => enc_d_logic(28, ra_n, rd, imm),
+                };
+                sink.put4(word);
+            }
+
+            &Inst::UnaryRR { op, rd, rn } => {
+                let rd = reg_num(rd.to_reg());
+                let rn = reg_num(rn);
+                let word = match op {
+                    UnaryOp::Neg => enc_xo(rd, rn, 0, 104),
+                    // `nor rd, rn, rn` is the canonical `not`.
+                    UnaryOp::Not => enc_x_logic(rn, rd, rn, 124),
+                };
+                sink.put4(word);
+            }
+
+            &Inst::ShiftRRR { op, rd, ra, rb } => {
+                let rd = reg_num(rd.to_reg());
+                let ra = reg_num(ra);
+                let rb = reg_num(rb);
+                let xo = match op {
+                    ShiftOp::Slw => 24,
+                    ShiftOp::Srw => 536,
+                    ShiftOp::Sraw => 792,
+                    ShiftOp::Sld => 27,
+                    ShiftOp::Srd => 539,
+                    ShiftOp::Srad => 794,
+                };
+                sink.put4(enc_x_logic(ra, rd, rb, xo));
+            }
+
+            &Inst::BitCount { op, rd, rn, ty } => {
+                let rd_n = reg_num(rd.to_reg());
+                let rn_n = reg_num(rn);
+                let is_64 = ty == I64;
+                match op {
+                    BitOp::Clz => {
+                        let xo = if is_64 { 58 } else { 26 };
+                        sink.put4(enc_x_logic(rn_n, rd_n, 0, xo));
+                    }
+                    BitOp::Popcnt => {
+                        let xo = if is_64 { 506 } else { 378 };
+                        sink.put4(enc_x_logic(rn_n, rd_n, 0, xo));
+                    }
+                    BitOp::Ctz if emit_info.isa_flags.has_isa_3_0() => {
+                        let xo = if is_64 { 570 } else { 538 };
+                        sink.put4(enc_x_logic(rn_n, rd_n, 0, xo));
+                    }
+                    BitOp::Ctz => {
+                        // Without ISA 3.0, count trailing zeros as
+                        // `popcnt((x - 1) & ~x)`, which yields the full
+                        // width for x == 0.
+                        let src = if is_64 {
+                            rn_n
+                        } else {
+                            // Force bit 32 set so a zero low word yields
+                            // 32, and so that garbage above bit 31 (which
+                            // callers may leave in an i32) cannot affect
+                            // the count.
+                            let tmp = reg_num(spilltmp_reg());
+                            for w in Inst::load_constant_words(0, 0xFFFF_FFFF_0000_0000) {
+                                sink.put4(w);
+                            }
+                            sink.put4(enc_x_logic(rn_n, tmp, 0, 444)); // or tmp, rn, r0
+                            tmp
+                        };
+                        sink.put4(enc_d(14, 0, src, (-1i16) as u16)); // addi r0, src, -1
+                        sink.put4(enc_x_logic(0, 0, src, 60)); // andc r0, r0, src
+                        sink.put4(enc_x_logic(0, rd_n, 0, 506)); // popcntd rd, r0
+                    }
+                }
+            }
+
+            &Inst::DivRem { op, rd, ra, rb, ty } => {
+                Inst::emit_divrem(sink, emit_info, state, op, rd, ra, rb, ty);
+            }
+
+            &Inst::Select { rd, kind, rt, rf } => {
+                kind.emit_cmp(sink);
+                let (bit, polarity) = kind.bit_and_polarity();
+                let rd = reg_num(rd.to_reg());
+                // `isel rd, RA, RB, bit` picks RA when the bit is set.
+                // Neither operand can be r0 (which isel reads as a literal
+                // zero) because r0 is not allocatable.
+                let (a, b) = if polarity {
+                    (reg_num(rt), reg_num(rf))
+                } else {
+                    (reg_num(rf), reg_num(rt))
+                };
+                debug_assert!(a != 0 && b != 0);
+                sink.put4(enc_isel(rd, a, b, bit));
+            }
+
+            &Inst::FpuRRR { op, rd, ra, rb, ty } => {
+                // The single- and double-precision forms differ only in
+                // primary opcode; using the single forms for `f32` is what
+                // rounds each result to single precision.
+                let opcd = if ty == F32 { 59 } else { 63 };
+                let rd = reg_num(rd.to_reg());
+                let ra = reg_num(ra);
+                let rb = reg_num(rb);
+                let word = match op {
+                    FpuOp2::Add => enc_a(opcd, rd, ra, rb, 0, 21),
+                    FpuOp2::Sub => enc_a(opcd, rd, ra, rb, 0, 20),
+                    // `fmul` takes its second operand in FRC.
+                    FpuOp2::Mul => enc_a(opcd, rd, ra, 0, rb, 25),
+                    FpuOp2::Div => enc_a(opcd, rd, ra, rb, 0, 18),
+                    // `fcpsgn` takes the sign from FRA and the magnitude
+                    // from FRB, and has no single-precision form.
+                    FpuOp2::CopySign => enc_x_opcd(63, rd, ra, rb, 8),
+                };
+                sink.put4(word);
+            }
+
+            &Inst::FpuRR { op, rd, rn, ty } => {
+                let rd = reg_num(rd.to_reg());
+                let rn = reg_num(rn);
+                let word = match op {
+                    FpuOp1::Neg => enc_x_opcd(63, rd, 0, rn, 40),
+                    FpuOp1::Abs => enc_x_opcd(63, rd, 0, rn, 264),
+                    FpuOp1::Sqrt => {
+                        let opcd = if ty == F32 { 59 } else { 63 };
+                        enc_a(opcd, rd, 0, rn, 0, 22)
+                    }
+                    FpuOp1::Mov => enc_fmr(rd, rn),
+                    FpuOp1::Demote => enc_x_opcd(63, rd, 0, rn, 12), // frsp
+                };
+                sink.put4(word);
+            }
+
+            &Inst::FpuFma {
+                rd,
+                ra,
+                rc,
+                rb,
+                ty,
+            } => {
+                let opcd = if ty == F32 { 59 } else { 63 };
+                sink.put4(enc_a(
+                    opcd,
+                    reg_num(rd.to_reg()),
+                    reg_num(ra),
+                    reg_num(rb),
+                    reg_num(rc),
+                    29,
+                ));
+            }
+
+            &Inst::FpuCmpSet { rd, kind } => {
+                let (cror, bit, polarity) = kind.emit_cmp(sink);
+                let _ = cror;
+                let rd = reg_num(rd.to_reg());
+                sink.put4(enc_d(14, rd, 0, 1)); // li rd, 1
+                if polarity {
+                    for w in Inst::load_constant_words(0, 0) {
+                        sink.put4(w);
+                    }
+                    sink.put4(enc_isel(rd, rd, 0, bit));
+                } else {
+                    sink.put4(enc_isel(rd, 0, rd, bit));
+                }
+            }
+
+            &Inst::FpuCondBr {
+                taken,
+                not_taken,
+                kind,
+            } => {
+                let (_, bit, polarity) = kind.emit_cmp(sink);
+                match taken {
+                    CondBrTarget::Label(label) => {
+                        let bc_off = sink.cur_offset();
+                        let code = enc_bc(bo_for(polarity), bit, 0, false);
+                        let inverted = enc_bc(bo_for(!polarity), bit, 0, false).to_le_bytes();
+                        sink.use_label_at_offset(bc_off, label, LabelUse::Branch16);
+                        sink.add_cond_branch(bc_off, bc_off + 4, label, &inverted);
+                        sink.put4(code);
+                    }
+                    CondBrTarget::Fallthrough => panic!("Cannot fallthrough in taken target"),
+                }
+                match not_taken {
+                    CondBrTarget::Label(label) => {
+                        Inst::gen_jump(label).emit(sink, emit_info, state)
+                    }
+                    CondBrTarget::Fallthrough => {}
+                }
+            }
+
+            &Inst::IntToFpu { rd, rn, signed, ty } => {
+                let opcd = if ty == F32 { 59 } else { 63 };
+                let xo = if signed { 846 } else { 974 };
+                sink.put4(enc_x_opcd(opcd, reg_num(rd.to_reg()), 0, reg_num(rn), xo));
+            }
+
+            &Inst::MovToFpr { rd, rn } => {
+                sink.put4(enc_xx1(reg_num(rd.to_reg()), reg_num(rn), 179));
+            }
+
+            &Inst::MovFromFpr { rd, rn } => {
+                sink.put4(enc_xx1(reg_num(rn), reg_num(rd.to_reg()), 51));
+            }
+
+            &Inst::Extend {
+                rd,
+                rn,
+                signed,
+                from_bits,
+                ..
+            } => {
+                let rd = reg_num(rd.to_reg());
+                let rn = reg_num(rn);
+                let word = if signed {
+                    match from_bits {
+                        8 => enc_x_logic(rn, rd, 0, 954),  // extsb
+                        16 => enc_x_logic(rn, rd, 0, 922), // extsh
+                        32 => enc_x_logic(rn, rd, 0, 986), // extsw
+                        _ => unreachable!("extend from {from_bits}"),
+                    }
+                } else {
+                    // rldicl rd, rn, 0, 64-from: clear the high bits.
+                    enc_md(rn, rd, 0, 64 - u32::from(from_bits), 0)
+                };
+                sink.put4(word);
+            }
+
+            &Inst::Load {
+                rd, op, flags, from, ..
+            } => {
+                if let Some(trap_code) = flags.trap_code() {
+                    sink.add_trap(trap_code);
+                }
+                let rt = reg_num(rd.to_reg());
+                let (d_opcd, ds_xo, x_xo) = match op {
+                    LoadOP::Lbz => (34, None, 87),
+                    LoadOP::Lhz => (40, None, 279),
+                    LoadOP::Lwz => (32, None, 23),
+                    LoadOP::Ld => (58, Some(0), 21),
+                    LoadOP::Lfs => (48, None, 535),
+                    LoadOP::Lfd => (50, None, 599),
+                };
+                emit_mem_access(sink, state, from, rt, d_opcd, ds_xo, x_xo);
+            }
+
+            &Inst::Store {
+                to, op, flags, src, ..
+            } => {
+                if let Some(trap_code) = flags.trap_code() {
+                    sink.add_trap(trap_code);
+                }
+                let rs = reg_num(src);
+                let (d_opcd, ds_xo, x_xo) = match op {
+                    StoreOP::Stb => (38, None, 215),
+                    StoreOP::Sth => (44, None, 407),
+                    StoreOP::Stw => (36, None, 151),
+                    StoreOP::Std => (62, Some(0), 149),
+                    StoreOP::Stfs => (52, None, 663),
+                    StoreOP::Stfd => (54, None, 727),
+                };
+                emit_mem_access(sink, state, to, rs, d_opcd, ds_xo, x_xo);
+            }
+
+            &Inst::LoadAddr { rd, mem } => {
+                let (base, offset) = mem.to_base_and_offset(state.frame_layout());
+                let rd_n = reg_num(rd.to_reg());
+                let base_n = reg_num(base);
+                debug_assert!(base_n != 0, "r0 is not a valid addi base");
+                if let Ok(imm16) = i16::try_from(offset) {
+                    sink.put4(enc_d(14, rd_n, base_n, imm16 as u16)); // addi
+                } else {
+                    for w in Inst::load_constant_words(0, offset as u64) {
+                        sink.put4(w);
+                    }
+                    sink.put4(enc_xo(rd_n, base_n, 0, 266)); // add rd, base, r0
+                }
+            }
+
+            &Inst::Ret => sink.put4(enc_blr()),
+
+            &Inst::Mov { rd, rm, .. } => {
+                debug_assert_eq!(rd.to_reg().class(), rm.class());
+                if rd.to_reg() == rm {
+                    return;
+                }
+                match rm.class() {
+                    RegClass::Int => {
+                        // ori rd, rm, 0
+                        sink.put4(enc_d_logic(24, reg_num(rm), reg_num(rd.to_reg()), 0));
+                    }
+                    RegClass::Float => {
+                        sink.put4(enc_fmr(reg_num(rd.to_reg()), reg_num(rm)));
+                    }
+                    RegClass::Vector => {
+                        unimplemented!("ppc64 vector moves are not yet supported")
+                    }
+                }
+            }
+
+            &Inst::CmpSet { rd, kind } => {
+                // cmp reads its inputs before rd is written, so a plain
+                // (non-early) def is fine even if rd aliases an input.
+                kind.emit_cmp(sink);
+                let rd = reg_num(rd.to_reg());
+                let (bit, polarity) = kind.bit_and_polarity();
+                sink.put4(enc_d(14, rd, 0, 1)); // li rd, 1
+                if polarity {
+                    // isel rd, rd(=1), r0(=const 0 via the RA quirk? no:
+                    // RB has no quirk, so load a real zero into r0 first).
+                    for w in Inst::load_constant_words(0, 0) {
+                        sink.put4(w);
+                    }
+                    sink.put4(enc_isel(rd, rd, 0, bit));
+                } else {
+                    // Bit clear means "condition holds": select 1 (in rd,
+                    // RB position) when clear, constant 0 (RA=r0 quirk)
+                    // when set.
+                    sink.put4(enc_isel(rd, 0, rd, bit));
+                }
+            }
+
+            &Inst::Jump { label } => {
+                sink.use_label_at_offset(start_off, label, LabelUse::Branch26);
+                sink.add_uncond_branch(start_off, start_off + 4, label);
+                sink.put4(enc_b(0, false));
+            }
+
+            &Inst::CondBr {
+                taken,
+                not_taken,
+                kind,
+            } => {
+                // The compare is emitted outside the region registered
+                // with the buffer's branch-folding machinery; only the
+                // 4-byte `bc` participates, so inversion is a same-size
+                // patch of the BO field.
+                kind.emit_cmp(sink);
+                match taken {
+                    CondBrTarget::Label(label) => {
+                        let bc_off = sink.cur_offset();
+                        let code = kind.enc_bc(0);
+                        let inverted = kind.inverse().enc_bc(0).to_le_bytes();
+                        sink.use_label_at_offset(bc_off, label, LabelUse::Branch16);
+                        sink.add_cond_branch(bc_off, bc_off + 4, label, &inverted);
+                        sink.put4(code);
+                    }
+                    CondBrTarget::Fallthrough => panic!("Cannot fallthrough in taken target"),
+                }
+                match not_taken {
+                    CondBrTarget::Label(label) => {
+                        Inst::gen_jump(label).emit(sink, emit_info, state)
+                    }
+                    CondBrTarget::Fallthrough => {}
+                }
+            }
+
+            &Inst::Udf { trap_code } => {
+                sink.add_trap(trap_code);
+                sink.put4(TRAP_INSTRUCTION);
+            }
+
+            &Inst::TrapIf { kind, trap_code } => {
+                let label_end = sink.get_label();
+                Inst::CondBr {
+                    taken: CondBrTarget::Label(label_end),
+                    not_taken: CondBrTarget::Fallthrough,
+                    kind: kind.inverse(),
+                }
+                .emit(sink, emit_info, state);
+                Inst::Udf { trap_code }.emit(sink, emit_info, state);
+                sink.bind_label(label_end, &mut state.ctrl_plane);
+            }
+
+            Inst::Call { info } => {
+                sink.add_reloc(Reloc::Ppc64Call, &info.dest, 0);
+                sink.put4(enc_b(0, true)); // bl
+
+                if let Some(s) = state.take_stack_map() {
+                    let offset = sink.cur_offset();
+                    sink.push_user_stack_map(state, offset, s);
+                }
+                if let Some(try_call) = info.try_call_info.as_ref() {
+                    sink.add_try_call_site(
+                        Some(state.frame_layout.sp_to_fp()),
+                        try_call.exception_handlers(&state.frame_layout),
+                    );
+                } else {
+                    sink.add_call_site();
+                }
+
+                let callee_pop_size = i32::try_from(info.callee_pop_size).unwrap();
+                if callee_pop_size > 0 {
+                    for inst in Ppc64MachineDeps::gen_sp_reg_adjust(-callee_pop_size) {
+                        inst.emit(sink, emit_info, state);
+                    }
+                }
+
+                if info.patchable {
+                    unimplemented!("patchable calls are not yet supported on ppc64");
+                }
+                info.emit_retval_loads::<Ppc64MachineDeps, _, _>(
+                    state.frame_layout().stackslots_size,
+                    |inst| inst.emit(sink, emit_info, state),
+                    |_needed_space| None,
+                );
+
+                if let Some(try_call) = info.try_call_info.as_ref() {
+                    Inst::gen_jump(try_call.continuation).emit(sink, emit_info, state);
+                }
+            }
+
+            Inst::CallInd { info } => {
+                // The operand collector pins `dest` to r12 (the ELFv2
+                // global-entry convention).
+                sink.put4(enc_mtctr(reg_num(info.dest)));
+                sink.put4(enc_bctr(true)); // bctrl
+
+                if let Some(s) = state.take_stack_map() {
+                    let offset = sink.cur_offset();
+                    sink.push_user_stack_map(state, offset, s);
+                }
+                if let Some(try_call) = info.try_call_info.as_ref() {
+                    sink.add_try_call_site(
+                        Some(state.frame_layout.sp_to_fp()),
+                        try_call.exception_handlers(&state.frame_layout),
+                    );
+                } else {
+                    sink.add_call_site();
+                }
+
+                let callee_pop_size = i32::try_from(info.callee_pop_size).unwrap();
+                if callee_pop_size > 0 {
+                    for inst in Ppc64MachineDeps::gen_sp_reg_adjust(-callee_pop_size) {
+                        inst.emit(sink, emit_info, state);
+                    }
+                }
+
+                info.emit_retval_loads::<Ppc64MachineDeps, _, _>(
+                    state.frame_layout().stackslots_size,
+                    |inst| inst.emit(sink, emit_info, state),
+                    |_needed_space| None,
+                );
+
+                if let Some(try_call) = info.try_call_info.as_ref() {
+                    Inst::gen_jump(try_call.continuation).emit(sink, emit_info, state);
+                }
+            }
+
+            Inst::LoadExtName { rd, name, offset } => {
+                // bcl 20,31,$+4 ; mflr rd ; ld rd, 12(rd) ; b $+12 ;
+                // .quad <sym+offset>
+                //
+                // LR is dead here (saved by the prologue, clobbered by
+                // calls), so the bcl trick is safe. The 8-byte island
+                // carries an Abs8 relocation.
+                let rd = reg_num(rd.to_reg());
+                sink.put4(BCL_20_31_PLUS4);
+                sink.put4(enc_mflr(rd));
+                sink.put4(enc_ds(58, rd, rd, 12, 0)); // ld rd, 12(rd)
+                sink.put4(enc_b(12, false)); // skip the literal
+                sink.add_reloc(Reloc::Abs8, &**name, *offset);
+                sink.put8(0);
+            }
+
+            &Inst::Mflr { rd } => sink.put4(enc_mflr(reg_num(rd.to_reg()))),
+            &Inst::Mtlr { rs } => sink.put4(enc_mtlr(reg_num(rs))),
+
+            &Inst::Unwind { ref inst } => sink.add_unwind(inst.clone()),
+        }
+
+        let end_off = sink.cur_offset();
+        debug_assert!(
+            (end_off - start_off) <= Inst::worst_case_size(),
+            "inst {self:?} longer ({}) than worst-case size",
+            end_off - start_off,
+        );
+    }
+
+    fn pretty_print_inst(&self, state: &mut Self::State) -> String {
+        self.print_with_state(state)
+    }
+}

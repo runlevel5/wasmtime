@@ -1,0 +1,36 @@
+test compile precise-output
+target powerpc64le power9
+
+; With ISA 3.0 the `cnttz{w,d}` instructions replace the emulation.
+function %ctz_i64(i64) -> i64 {
+block0(v0: i64):
+    v1 = ctz v0
+    return v1
+}
+
+; VCode:
+; block0:
+;   ctz.i64 r3, r3
+;   blr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   cnttzd r3, r3
+;   blr
+
+function %ctz_i32(i32) -> i32 {
+block0(v0: i32):
+    v1 = ctz v0
+    return v1
+}
+
+; VCode:
+; block0:
+;   ctz.i32 r3, r3
+;   blr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   cnttzw r3, r3
+;   blr
+

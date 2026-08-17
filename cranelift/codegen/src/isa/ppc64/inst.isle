@@ -1,0 +1,564 @@
+;; Instruction formats for the ppc64le backend.
+;;
+;; This backend targets the ELFv2 ABI, little-endian, with a POWER8 (ISA
+;; 2.07) baseline. See `abi.rs` for the frame layout and register
+;; conventions.
+
+;; Types passed through to Rust; defined in `inst/args.rs` and the shared
+;; machinst code.
+(type BoxCallInfo (primitive BoxCallInfo))
+(type BoxCallIndInfo (primitive BoxCallIndInfo))
+(type IntegerCompare (primitive IntegerCompare))
+(type AMode (primitive AMode))
+(type CondBrTarget (primitive CondBrTarget))
+(type FloatCompare (primitive FloatCompare))
+
+;; Integer ALU operations, register-register. The emitter maps these to
+;; XO-form (add/subf/mull/div) or X-form (logicals) encodings.
+(type AluOp
+  (enum
+    (Add)
+    (Sub)
+    (And)
+    (Or)
+    (Xor)
+    (Mulld)
+))
+
+;; ALU operations with a 16-bit immediate. `Addi` reads the immediate as
+;; signed, `Andi` as unsigned; the lowering rules only produce values in
+;; the appropriate range.
+(type AluImmOp
+  (enum
+    (Addi)
+    (Andi)
+))
+
+;; Shift operations. The shift amount is masked by the lowering rules:
+;; PPC's shifts consume 6 bits (word forms) or 7 bits (doubleword forms)
+;; and produce zero when the amount exceeds the width, whereas CLIF masks
+;; the amount to the type's width.
+(type ShiftOp
+  (enum
+    (Slw)
+    (Srw)
+    (Sraw)
+    (Sld)
+    (Srd)
+    (Srad)
+))
+
+;; Single-operand integer operations.
+(type UnaryOp
+  (enum
+    (Neg)
+    (Not)
+))
+
+;; Bit-counting operations, expanded at emit time: the POWER9 (ISA 3.0)
+;; `cnttz{w,d}` instructions are used when available, otherwise trailing
+;; zeros are emulated.
+(type BitOp
+  (enum
+    (Clz)
+    (Ctz)
+    (Popcnt)
+))
+
+;; Division and remainder. Expanded at emit time because PPC's divide
+;; instructions leave the result undefined rather than trapping on a zero
+;; divisor or on signed overflow, so the checks CLIF requires must be
+;; emitted explicitly.
+(type DivOp
+  (enum
+    (SDiv)
+    (UDiv)
+    (SRem)
+    (URem)
+))
+
+
+;; Floating-point binary operations. The single-precision forms differ only
+;; in primary opcode, so the operand type selects between them.
+(type FpuOp2
+  (enum
+    (Add)
+    (Sub)
+    (Mul)
+    (Div)
+    (CopySign)
+))
+
+;; Floating-point unary operations.
+(type FpuOp1
+  (enum
+    (Neg)
+    (Abs)
+    (Sqrt)
+    (Mov)
+    ;; Round a double to single precision (`frsp`), for `fdemote`.
+    (Demote)
+))
+
+;; Load opcodes; selected by type in `LoadOP::from_type`.
+(type LoadOP
+  (enum
+    (Lbz)   ;; i8, zero-extending
+    (Lhz)   ;; i16, zero-extending
+    (Lwz)   ;; i32, zero-extending
+    (Ld)    ;; i64
+    (Lfs)   ;; f32
+    (Lfd)   ;; f64
+))
+
+;; Store opcodes.
+(type StoreOP
+  (enum
+    (Stb)
+    (Sth)
+    (Stw)
+    (Std)
+    (Stfs)
+    (Stfd)
+))
+
+(type MInst
+  (enum
+    ;; A no-op of zero size.
+    (Nop0)
+
+    ;; A 4-byte no-op (`ori r0, r0, 0`).
+    (Nop4)
+
+    ;; Materialize a 64-bit constant, using the shortest sequence of
+    ;; `li`/`lis`/`ori`/`rldicr`/`oris` the emitter can find (1-5
+    ;; instructions). PPC64 before POWER10 has no PC-relative addressing,
+    ;; so constants are built from immediates rather than loaded from a
+    ;; pool by default.
+    (LoadConst64
+      (rd WritableReg)
+      (imm u64))
+
+    ;; Register-register ALU operation.
+    (AluRRR
+      (op AluOp)
+      (rd WritableReg)
+      (ra Reg)
+      (rb Reg))
+
+    ;; ALU operation with a 16-bit immediate.
+    (AluRRImm16
+      (op AluImmOp)
+      (rd WritableReg)
+      (ra Reg)
+      (imm u16))
+
+    ;; Single-operand integer operation.
+    (UnaryRR
+      (op UnaryOp)
+      (rd WritableReg)
+      (rn Reg))
+
+    ;; Shift by a register amount, pre-masked by the lowering rules.
+    (ShiftRRR
+      (op ShiftOp)
+      (rd WritableReg)
+      (ra Reg)
+      (rb Reg))
+
+    ;; Bit count. `ty` selects the word or doubleword form and, for
+    ;; trailing zeros without ISA 3.0, the emulation sequence.
+    (BitCount
+      (op BitOp)
+      (rd WritableReg)
+      (rn Reg)
+      (ty Type))
+
+    ;; Division or remainder, including the divide-by-zero and signed
+    ;; overflow checks CLIF requires.
+    (DivRem
+      (op DivOp)
+      (rd WritableReg)
+      (ra Reg)
+      (rb Reg)
+      (ty Type))
+
+    ;; Conditional select via `cmp` + `isel`.
+    (Select
+      (rd WritableReg)
+      (kind IntegerCompare)
+      (rt Reg)
+      (rf Reg))
+
+    ;; Floating-point binary operation.
+    (FpuRRR
+      (op FpuOp2)
+      (rd WritableReg)
+      (ra Reg)
+      (rb Reg)
+      (ty Type))
+
+    ;; Floating-point unary operation.
+    (FpuRR
+      (op FpuOp1)
+      (rd WritableReg)
+      (rn Reg)
+      (ty Type))
+
+    ;; Fused multiply-add: `rd = ra * rc + rb`.
+    (FpuFma
+      (rd WritableReg)
+      (ra Reg)
+      (rc Reg)
+      (rb Reg)
+      (ty Type))
+
+    ;; Materialize a floating-point comparison result as 0/1 in a GPR.
+    (FpuCmpSet
+      (rd WritableReg)
+      (kind FloatCompare))
+
+    ;; Conditional branch on a floating-point comparison.
+    (FpuCondBr
+      (taken CondBrTarget)
+      (not_taken CondBrTarget)
+      (kind FloatCompare))
+
+    ;; Convert a 64-bit integer, held in an FPR, to floating point.
+    ;; `signed` selects `fcfid`/`fcfidu`, and `ty` the result precision.
+    (IntToFpu
+      (rd WritableReg)
+      (rn Reg)
+      (signed bool)
+      (ty Type))
+
+    ;; Move a GPR's bits into an FPR (`mtvsrd`), and back (`mfvsrd`).
+    (MovToFpr
+      (rd WritableReg)
+      (rn Reg))
+    (MovFromFpr
+      (rd WritableReg)
+      (rn Reg))
+
+    ;; Sign- or zero-extend a narrow value.
+    (Extend
+      (rd WritableReg)
+      (rn Reg)
+      (signed bool)
+      (from_bits u8)
+      (to_bits u8))
+
+    ;; A load from memory.
+    (Load
+      (rd WritableReg)
+      (op LoadOP)
+      (flags MemFlagsData)
+      (from AMode))
+
+    ;; A store to memory.
+    (Store
+      (to AMode)
+      (op StoreOP)
+      (flags MemFlagsData)
+      (src Reg))
+
+    ;; Compute the address of an AMode into a register.
+    (LoadAddr
+      (rd WritableReg)
+      (mem AMode))
+
+    ;; A pseudo-instruction that captures register arguments in vregs.
+    (Args
+      (args VecArgPair))
+
+    ;; A pseudo-instruction that moves vregs to return registers.
+    (Rets
+      (rets VecRetPair))
+
+    ;; Return (`blr`). The Rets pseudo-inst above handles the moves; the
+    ;; epilogue itself is generated by the ABI code.
+    (Ret)
+
+    ;; Register-register move (`ori rd, rs, 0` or `fmr`).
+    (Mov
+      (rd WritableReg)
+      (rm Reg)
+      (ty Type))
+
+    ;; Materialize an icmp result as 0/1 in a GPR:
+    ;; `cmp/cmpl cr0; li rd, 1; li r0, 0; isel rd, rd/r0 per cc`.
+    ;; `isel` is available on all POWER8 (ISA 2.06+) hardware.
+    (CmpSet
+      (rd WritableReg)
+      (kind IntegerCompare))
+
+    ;; Unconditional jump (`b`).
+    (Jump
+      (label MachLabel))
+
+    ;; Conditional branch: `cmp/cmpl cr0` followed by `bc`.
+    (CondBr
+      (taken CondBrTarget)
+      (not_taken CondBrTarget)
+      (kind IntegerCompare))
+
+    ;; Unconditional trap (`trap`, i.e. `tw 31,0,0`).
+    (Udf
+      (trap_code TrapCode))
+
+    ;; Trap if the comparison holds: `cmp; bc !cond, +8; trap`.
+    (TrapIf
+      (kind IntegerCompare)
+      (trap_code TrapCode))
+
+    ;; Direct call (`bl` with a Ppc64Call relocation).
+    (Call
+      (info BoxCallInfo))
+
+    ;; Indirect call (`mtctr; bctrl`). The target is constrained to r12,
+    ;; which the ELFv2 global-entry convention requires to hold the
+    ;; callee's entry address.
+    (CallInd
+      (info BoxCallIndInfo))
+
+    ;; Load the address of an external symbol. Emitted as a `bcl 20,31,+4;
+    ;; mflr rd; ld rd, 12(rd); b +12; .quad sym` sequence: the 8-byte
+    ;; island carries an Abs8 relocation, which every object/JIT consumer
+    ;; already knows how to process. This costs an LR clobber, which is
+    ;; fine: LR is dead between the prologue and any call.
+    (LoadExtName
+      (rd WritableReg)
+      (name BoxExternalName)
+      (offset i64))
+
+    ;; Move from the link register (`mflr`). Used by the prologue; rd is
+    ;; always the r0 scratch there.
+    (Mflr
+      (rd WritableReg))
+
+    ;; Move to the link register (`mtlr`). Used by the epilogue.
+    (Mtlr
+      (rs Reg))
+
+    ;; Marker for unwind info.
+    (Unwind
+      (inst UnwindInst))
+
+    ;; Keep a vreg alive with no other effect.
+    (DummyUse
+      (reg Reg))
+))
+
+;;;; Call metadata constructors, implemented in `lower/isle.rs` ;;;;;;;;;;;;;
+
+(decl gen_call_info (Sig ExternalName CallArgList CallRetList OptionTryCallInfo bool) BoxCallInfo)
+(extern constructor gen_call_info gen_call_info)
+
+(decl gen_call_ind_info (Sig Reg CallArgList CallRetList OptionTryCallInfo) BoxCallIndInfo)
+(extern constructor gen_call_ind_info gen_call_ind_info)
+
+;;;; Internal constructor helpers ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;; Emit an ALU op producing a fresh temp.
+(decl alu_rrr (AluOp Reg Reg) Reg)
+(rule (alu_rrr op a b)
+  (let ((dst WritableReg (temp_writable_reg $I64))
+        (_ Unit (emit (MInst.AluRRR op dst a b))))
+    dst))
+
+(decl ppc_add (Reg Reg) Reg)
+(rule (ppc_add a b) (alu_rrr (AluOp.Add) a b))
+(decl ppc_sub (Reg Reg) Reg)
+(rule (ppc_sub a b) (alu_rrr (AluOp.Sub) a b))
+(decl ppc_and (Reg Reg) Reg)
+(rule (ppc_and a b) (alu_rrr (AluOp.And) a b))
+(decl ppc_or (Reg Reg) Reg)
+(rule (ppc_or a b) (alu_rrr (AluOp.Or) a b))
+(decl ppc_xor (Reg Reg) Reg)
+(rule (ppc_xor a b) (alu_rrr (AluOp.Xor) a b))
+(decl ppc_mulld (Reg Reg) Reg)
+(rule (ppc_mulld a b) (alu_rrr (AluOp.Mulld) a b))
+
+;; ALU with a 16-bit immediate.
+(decl alu_rr_imm16 (AluImmOp Reg u16) Reg)
+(rule (alu_rr_imm16 op a imm)
+  (let ((dst WritableReg (temp_writable_reg $I64))
+        (_ Unit (emit (MInst.AluRRImm16 op dst a imm))))
+    dst))
+
+;; `addi rd, ra, imm` when the constant fits a signed 16-bit field.
+(decl pure partial simm16_from_imm64 (Imm64) u16)
+(extern constructor simm16_from_imm64 simm16_from_imm64)
+
+;; Mask a shift amount down to `ty`'s width, as CLIF requires. PPC's own
+;; shifts consume a wider field and produce zero past the width, so the
+;; masking cannot be left to the hardware.
+(decl mask_shift_amount (Value Type) Reg)
+(rule 1 (mask_shift_amount (iconst _ (u64_from_imm64 n)) ty)
+  (imm $I64 (u64_and n (ty_shift_mask ty))))
+(rule 0 (mask_shift_amount val ty)
+  (alu_rr_imm16 (AluImmOp.Andi) (put_in_reg val) (shift_mask_u16 ty)))
+
+(decl shift_mask_u16 (Type) u16)
+(extern constructor shift_mask_u16 shift_mask_u16)
+
+(decl gen_unary (UnaryOp Reg) Reg)
+(rule (gen_unary op rn)
+  (let ((dst WritableReg (temp_writable_reg $I64))
+        (_ Unit (emit (MInst.UnaryRR op dst rn))))
+    dst))
+
+(decl gen_shift (ShiftOp Reg Reg) Reg)
+(rule (gen_shift op ra rb)
+  (let ((dst WritableReg (temp_writable_reg $I64))
+        (_ Unit (emit (MInst.ShiftRRR op dst ra rb))))
+    dst))
+
+(decl gen_bitcount (BitOp Reg Type) Reg)
+(rule (gen_bitcount op rn ty)
+  (let ((dst WritableReg (temp_writable_reg $I64))
+        (_ Unit (emit (MInst.BitCount op dst rn ty))))
+    dst))
+
+(decl gen_divrem (DivOp Reg Reg Type) Reg)
+(rule (gen_divrem op ra rb ty)
+  (let ((dst WritableReg (temp_writable_reg $I64))
+        (_ Unit (emit (MInst.DivRem op dst ra rb ty))))
+    dst))
+
+(decl gen_select (IntegerCompare Reg Reg) Reg)
+(rule (gen_select kind rt rf)
+  (let ((dst WritableReg (temp_writable_reg $I64))
+        (_ Unit (emit (MInst.Select dst kind rt rf))))
+    dst))
+
+(decl gen_trapif (IntegerCompare TrapCode) SideEffectNoResult)
+(rule (gen_trapif kind code)
+  (SideEffectNoResult.Inst (MInst.TrapIf kind code)))
+
+(decl fpu_rrr (FpuOp2 Reg Reg Type) Reg)
+(rule (fpu_rrr op a b ty)
+  (let ((dst WritableReg (temp_writable_reg ty))
+        (_ Unit (emit (MInst.FpuRRR op dst a b ty))))
+    dst))
+
+(decl fpu_rr (FpuOp1 Reg Type) Reg)
+(rule (fpu_rr op rn ty)
+  (let ((dst WritableReg (temp_writable_reg ty))
+        (_ Unit (emit (MInst.FpuRR op dst rn ty))))
+    dst))
+
+(decl fpu_fma (Reg Reg Reg Type) Reg)
+(rule (fpu_fma a c b ty)
+  (let ((dst WritableReg (temp_writable_reg ty))
+        (_ Unit (emit (MInst.FpuFma dst a c b ty))))
+    dst))
+
+(decl float_compare (FloatCC Reg Reg) FloatCompare)
+(extern constructor float_compare float_compare)
+
+(decl fpu_cmp_set (FloatCompare) Reg)
+(rule (fpu_cmp_set kind)
+  (let ((dst WritableReg (temp_writable_reg $I64))
+        (_ Unit (emit (MInst.FpuCmpSet dst kind))))
+    dst))
+
+(decl fpu_cond_br (FloatCompare MachLabel MachLabel) SideEffectNoResult)
+(rule (fpu_cond_br kind taken not_taken)
+  (SideEffectNoResult.Inst
+    (MInst.FpuCondBr (cond_br_target taken) (cond_br_target not_taken) kind)))
+
+;; Move bits between a GPR and an FPR. PPC has no floating-point immediate
+;; form, so constants are built in a GPR and transferred.
+(decl mov_to_fpr (Reg Type) Reg)
+(rule (mov_to_fpr rn ty)
+  (let ((dst WritableReg (temp_writable_reg ty))
+        (_ Unit (emit (MInst.MovToFpr dst rn))))
+    dst))
+
+;; Convert an integer to floating point. `fcfid` and friends read a 64-bit
+;; integer out of an FPR, so the value is widened to 64 bits in a GPR and
+;; then transferred across.
+(decl int_to_fpu (Reg bool Type) Reg)
+(rule (int_to_fpu rn signed ty)
+  (let ((dst WritableReg (temp_writable_reg ty))
+        (_ Unit (emit (MInst.IntToFpu dst rn signed ty))))
+    dst))
+
+(decl gen_int_to_fpu (Value Type bool Type) Reg)
+(rule (gen_int_to_fpu val in_ty signed out_ty)
+  (int_to_fpu (mov_to_fpr (gen_extend (put_in_reg val) signed (ty_bits in_ty) 64) $F64)
+              signed
+              out_ty))
+
+(decl mov_from_fpr (Reg) Reg)
+(rule (mov_from_fpr rn)
+  (let ((dst WritableReg (temp_writable_reg $I64))
+        (_ Unit (emit (MInst.MovFromFpr dst rn))))
+    dst))
+
+;; An `f32` lives in an FPR in double format, so its constant is the bit
+;; pattern of the widened value.
+(decl f32_bits_as_f64 (u32) u64)
+(extern constructor f32_bits_as_f64 f32_bits_as_f64)
+
+;; Materialize a 64-bit immediate.
+(decl imm (Type u64) Reg)
+(rule (imm _ty n)
+  (let ((dst WritableReg (temp_writable_reg $I64))
+        (_ Unit (emit (MInst.LoadConst64 dst n))))
+    dst))
+
+;; Sign/zero extension.
+(decl gen_extend (Reg bool u8 u8) Reg)
+(rule (gen_extend val signed from to)
+  (let ((dst WritableReg (temp_writable_reg $I64))
+        (_ Unit (emit (MInst.Extend dst val signed from to))))
+    dst))
+
+;; Loads and stores. The AMode is constructed by the `amode` extern
+;; constructor implemented in `lower/isle.rs`.
+(decl amode (Value i32) AMode)
+(extern constructor amode amode)
+
+(decl load_op_for_type (Type) LoadOP)
+(extern constructor load_op_for_type load_op_for_type)
+(decl store_op_for_type (Type) StoreOP)
+(extern constructor store_op_for_type store_op_for_type)
+
+(decl gen_load (Type AMode MemFlagsData) Reg)
+(rule (gen_load ty mem flags)
+  (let ((dst WritableReg (temp_writable_reg ty))
+        (_ Unit (emit (MInst.Load dst (load_op_for_type ty) flags mem))))
+    dst))
+
+(decl gen_store (Type AMode MemFlagsData Reg) SideEffectNoResult)
+(rule (gen_store ty mem flags src)
+  (SideEffectNoResult.Inst (MInst.Store mem (store_op_for_type ty) flags src)))
+
+;; Integer comparisons. Narrow (<32 bit) inputs are extended by the
+;; lowering rules before this is used; `cmpw`/`cmpd` (and their logical
+;; variants) ignore or use the full register appropriately for 32/64 bit.
+(decl int_compare (IntCC Reg Reg Type) IntegerCompare)
+(extern constructor int_compare int_compare)
+
+(decl gen_stack_addr (StackSlot Offset32) Reg)
+(extern constructor gen_stack_addr gen_stack_addr)
+
+(decl cmp_set (IntegerCompare) Reg)
+(rule (cmp_set kind)
+  (let ((dst WritableReg (temp_writable_reg $I64))
+        (_ Unit (emit (MInst.CmpSet dst kind))))
+    dst))
+
+;; Branch helpers.
+(decl ppc_jump (MachLabel) SideEffectNoResult)
+(rule (ppc_jump label) (SideEffectNoResult.Inst (MInst.Jump label)))
+
+(decl cond_br_target (MachLabel) CondBrTarget)
+(extern constructor cond_br_target cond_br_target)
+
+(decl ppc_cond_br (IntegerCompare MachLabel MachLabel) SideEffectNoResult)
+(rule (ppc_cond_br kind taken not_taken)
+  (SideEffectNoResult.Inst
+    (MInst.CondBr (cond_br_target taken) (cond_br_target not_taken) kind)))
