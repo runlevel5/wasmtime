@@ -333,7 +333,106 @@ redundant `li rX, 0` is currently materialized for compare-with-zero).
 - Grow `filetests/isa/ppc64/` toward the 100–240 file range of
   s390x/riscv64.
 
-### Phase 3 — Wasmtime runtime enablement (≈2–4 weeks, parallelisable with late Phase 2)
+### Phase 3 — Wasmtime runtime enablement — *mechanical half done*
+
+**Done (2026-08-18, Opus):** the parts that are templated by existing
+arches. All inert until `build.rs` is flipped (see below), so nothing
+changes on other hosts.
+
+- `crates/environ/src/compile/mod.rs` — `Powerpc64le` →
+  `object::Architecture::PowerPc64`, and `page_size_align()` = 64 KiB.
+- `cranelift/native/src/lib.rs` + `Cargo.toml` — `AT_HWCAP2` probe for
+  `ARCH_3_00`/`ARCH_3_1`, enabling `has_isa_3_0`/`has_isa_3_1`. The libc
+  dependency is now shared with riscv64's target gate.
+- `crates/wasmtime/src/config.rs::detect_host_feature` — the same probe
+  again (this logic is duplicated three times in tree by design).
+- `crates/wasmtime/src/engine.rs` — `has_isa_3_0`/`has_isa_3_1` added to
+  the flag→feature map. Without this every `Module::new` on a ppc64le host
+  would fail with "don't know how to test for target-specific flag".
+  Deliberately *not* following riscv64's `Some(true)`-for-everything
+  shortcut, which would let POWER9 code load on a POWER8 host.
+- `crates/jit-icache-coherence/src/libc.rs` — the
+  `dcbst`/`sync`/`icbi`/`sync`/`isync` sequence. PowerPC's instruction and
+  data caches are not coherent, so this is a correctness requirement, not
+  an optimisation.
+
+**Bug found by cross-compiling, which host builds could not see:**
+`Lower::increment_lowered_uses` in `machinst/lower.rs` is gated on a list
+of backend features that did not include `ppc64`, so a **ppc64-only**
+build — exactly the `host-arch` configuration a native ppc64le build uses
+— failed to compile. Fixed. Host builds passed only because `all-arch` or
+`arm64` kept the method alive. Lesson: `cargo check --target
+powerpc64le-unknown-linux-gnu` is the check that matters for anything
+`cfg`-gated; `rustup target add powerpc64le-unknown-linux-gnu` is enough
+(no C toolchain needed) as long as the `cache` and `debug-builtins`
+features are off, since those pull in C code.
+
+**Done (2026-08-18, Fable 5): Phase 3 complete and validated on real
+POWER9 hardware.** JIT-compiled WebAssembly executes natively:
+
+```
+host callback: 78            (wasm→host array trampoline, r12 discipline)
+arith(6,7) = 89              (integer lowerings incl. division expansion)
+float(3,4) = 4.58257569...   (√21: FP lowerings, FPR ABI)
+trap_div: IntegerDivisionByZero   (SIGILL → handler → trap-code lookup)
+oob: MemoryOutOfBounds       (guard page → SIGSEGV → handler)
+ALL SMOKE TESTS PASSED on powerpc64
+```
+
+plus **8/8 `wasmtime-internal-fiber` tests passing natively** — the
+hand-written stack switch works. Trap recovery working means the frame
+record, the unwinder offsets and the signal arms all agree.
+
+What landed:
+
+- `crates/unwinder/src/arch/ppc64.rs` + both `cfg_select!` lists. FP chain
+  matches the backend's record exactly (old FP at +0, RA at +8, caller SP
+  = FP+16). `resume_to_exception_handler` moves into r1/r31 from ordinary
+  registers (asm! cannot name them as operands) and jumps via CTR with
+  payloads in r3/r4.
+- `signals.rs` arms: PC = `gp_regs[32]` (NIP), FP = `gp_regs[31]`, per the
+  kernel `pt_regs` layout embedded in glibc's `mcontext_t`. No PC
+  correction needed (the kernel points NIP *at* the faulting word).
+- `crates/fiber/src/stackswitch/ppc64.rs`: saves LR, CR, r14–r31, f14–f31
+  **and v20–v31** (callee-saved per ELFv2 and freely used by LLVM-
+  vectorised host code — omitting them would be a silent corruption bug).
+  Vector save/restore via `stxvd2x`/`lxvd2x` with the offset in r0 (the
+  POWER8 baseline has no D-form VSX memory ops); the LE doubleword swap
+  cancels over a round trip. The start trampoline establishes a 32-byte
+  ELFv2 minimum frame before calling the entry point — ELFv2 callees
+  store LR into the *caller's* frame at r1+16, which from the raw fiber
+  top would land out of bounds. Indirect calls set r12 (global-entry TOC
+  derivation). CFI walks from the fiber stack back to the original thread
+  stack via a double-deref CFA expression through the stdu back-chain.
+- `build.rs` flip: `"powerpc64"` in `has_host_compiler_backend` and
+  `has_builtin_stackswitch`.
+
+**Found by hardware testing (the reason smoke tests exist):**
+
+1. **The trap opcode had to change.** `tw 31,0,0` raises SIGTRAP, which
+   Wasmtime's handler does not register. Now the all-zeros word
+   (permanently invalid per the ISA) → SIGILL, following riscv64.
+2. **`try_call` lowering rules were load-bearing**, not optional: Wasmtime
+   compiles wasm calls as `try_call` for exception-based unwinding. The
+   emission side was already in place from Phase 1; only the ISLE branch
+   rules were missing.
+3. **`get_exception_handler_address` needed a new `LabelAddress` MInst**
+   and a `PCRelHiLo` label-use kind: `bcl 20,31,$+4; mflr; addis; addi`
+   with the hi/lo pair patched at label resolution (±2 GiB) — the
+   pre-POWER10 "no PC-relative addressing" problem again, this time for
+   label addresses where the constant-island trick does not apply.
+4. `get_stack_pointer` / `get_frame_pointer` / `get_return_address`
+   lowerings (MovFromPReg + a load from [FP+8]).
+
+The 128-byte icache-block assumption was confirmed on hardware:
+`AT_DCACHEBSIZE=128 AT_ICACHEBSIZE=128`.
+
+Remote workflow notes: tree rsynced to `power9:~/wasmtime-ppc64` (101 MB
+without target/), smoke crate at `power9:~/smoke` (standalone, path dep on
+the synced tree — avoids the workspace dev-deps that need wasm32 targets).
+`TMPDIR=~/tmp` required everywhere (system /tmp is a full tmpfs).
+
+#### Reference: the full site list
 
 - `crates/wasmtime/build.rs` — add `"powerpc64"` to
   `has_host_compiler_backend` and `has_builtin_stackswitch` (flips 32 `cfg`
