@@ -560,6 +560,69 @@ impl MachInstEmit for Inst {
                 sink.put4(enc_xx1(reg_num(rd.to_reg()), tmp, 179)); // mtvsrd rd, r11
             }
 
+            &Inst::BrTable {
+                index,
+                tmp1,
+                tmp2,
+                ref targets,
+            } => {
+                // The default target is element zero; the rest form the
+                // table proper.
+                let default_target = targets[0];
+                let jt = &targets[1..];
+
+                // The setup is eight instructions and each table entry is
+                // one, so make sure an island cannot land in the middle.
+                let distance = ((12 + jt.len()) * 4) as u32;
+                if sink.island_needed(distance) {
+                    let around = sink.get_label();
+                    Inst::gen_jump(around).emit(sink, emit_info, state);
+                    sink.emit_island(distance + 4, &mut state.ctrl_plane);
+                    sink.bind_label(around, &mut state.ctrl_plane);
+                }
+
+                let addr = reg_num(tmp1.to_reg());
+                let ext = reg_num(tmp2.to_reg());
+                debug_assert!(addr != 0 && ext != 0);
+
+                // The upper half of the index is undefined, so narrow it
+                // before comparing: clrldi ext, index, 32.
+                sink.put4(enc_md(reg_num(index), ext, 0, 32, 0));
+
+                let n = jt.len() as u64;
+                match u16::try_from(n) {
+                    Ok(n16) => sink.put4(enc_cmpi(10, 0, 1, ext, n16)), // cmpldi
+                    Err(_) => {
+                        for w in Inst::load_constant_words(addr, n) {
+                            sink.put4(w);
+                        }
+                        sink.put4(enc_cmp(0, 1, ext, addr, 32)); // cmpld
+                    }
+                }
+
+                let compute = sink.get_label();
+                emit_bc_to_label(sink, compute, CR0_LT, true);
+                // Out of range: fall through to a branch to the default.
+                emit_b_to_label(sink, default_target);
+                sink.bind_label(compute, &mut state.ctrl_plane);
+
+                // Read the PC, then index into the table that follows.
+                // `bcl` leaves LR pointing at the `mflr`, and the five
+                // instructions after it plus the `mflr` itself occupy the
+                // 24 bytes before the table.
+                sink.put4(BCL_20_31_PLUS4);
+                sink.put4(enc_mflr(addr));
+                sink.put4(enc_md(ext, ext, 2, 61, 1)); // sldi ext, ext, 2
+                sink.put4(enc_xo(addr, addr, ext, 266)); // add addr, addr, ext
+                sink.put4(enc_d(14, addr, addr, 24)); // addi addr, addr, 24
+                sink.put4(enc_mtctr(addr));
+                sink.put4(enc_bctr(false));
+
+                for &target in jt {
+                    emit_b_to_label(sink, target);
+                }
+            }
+
             &Inst::EmitIsland { needed_space } => {
                 if sink.island_needed(needed_space) {
                     let skip = sink.get_label();
@@ -868,7 +931,10 @@ impl MachInstEmit for Inst {
         // following a call are unbounded in particular.
         let emits_own_island = matches!(
             self,
-            Inst::Call { .. } | Inst::CallInd { .. } | Inst::EmitIsland { .. }
+            Inst::Call { .. }
+                | Inst::CallInd { .. }
+                | Inst::EmitIsland { .. }
+                | Inst::BrTable { .. }
         );
         if !emits_own_island {
             let end_off = sink.cur_offset();

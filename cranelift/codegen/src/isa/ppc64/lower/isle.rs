@@ -25,6 +25,7 @@ type BoxCallIndInfo = Box<CallInfo<Reg>>;
 type BoxExternalName = Box<ExternalName>;
 type VecArgPair = Vec<ArgPair>;
 type VecRetPair = Vec<RetPair>;
+type VecMachLabel = Vec<MachLabel>;
 
 pub(crate) struct Ppc64IsleContext<'a, 'b, I, B>
 where
@@ -167,6 +168,17 @@ impl generated_code::Context for Ppc64IsleContext<'_, '_, MInst, Ppc64Backend> {
             .sized_stackslot_addr(slot, i64::from(offset) as u32, result);
         self.emit(&i);
         result.to_reg()
+    }
+
+    fn lower_br_table(&mut self, index: Reg, targets: &[MachLabel]) -> Unit {
+        let tmp1 = self.temp_writable_reg(I64);
+        let tmp2 = self.temp_writable_reg(I64);
+        self.emit(&MInst::BrTable {
+            index,
+            tmp1,
+            tmp2,
+            targets: targets.to_vec(),
+        });
     }
 
     fn read_return_address(&mut self) -> Reg {

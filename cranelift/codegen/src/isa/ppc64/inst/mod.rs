@@ -119,6 +119,16 @@ fn ppc64_get_operands(inst: &mut Inst, collector: &mut impl OperandVisitor) {
             collector.reg_def(rd);
         }
         Inst::EmitIsland { .. } => {}
+        Inst::BrTable {
+            index,
+            tmp1,
+            tmp2,
+            ..
+        } => {
+            collector.reg_use(index);
+            collector.reg_early_def(tmp1);
+            collector.reg_early_def(tmp2);
+        }
         Inst::Select { rd, kind, rt, rf } => {
             collector.reg_use(&mut kind.rs1);
             collector.reg_use(&mut kind.rs2);
@@ -287,9 +297,10 @@ impl MachInst for Inst {
 
     fn is_term(&self) -> MachTerminator {
         match self {
-            Inst::Jump { .. } | Inst::CondBr { .. } | Inst::FpuCondBr { .. } => {
-                MachTerminator::Branch
-            }
+            Inst::Jump { .. }
+            | Inst::CondBr { .. }
+            | Inst::FpuCondBr { .. }
+            | Inst::BrTable { .. } => MachTerminator::Branch,
             Inst::Rets { .. } => MachTerminator::Ret,
             Inst::Call { info } if info.try_call_info.is_some() => MachTerminator::Branch,
             Inst::CallInd { info } if info.try_call_info.is_some() => MachTerminator::Branch,
@@ -451,6 +462,9 @@ impl Inst {
                 )
             }
             Inst::EmitIsland { needed_space } => format!("emit_island {needed_space}"),
+            Inst::BrTable { index, targets, .. } => {
+                format!("br_table {} # {} targets", reg(*index), targets.len() - 1)
+            }
             Inst::FpuSelect { rd, kind, rt, rf } => format!(
                 "fselect.{} {}, {}, {} # cmp {}, {}",
                 kind.kind,

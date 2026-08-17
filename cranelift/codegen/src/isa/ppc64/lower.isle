@@ -307,6 +307,31 @@
 (rule (lower (fcmp _ cc x y))
   (output_reg (fpu_cmp_set (float_compare cc (put_in_reg x) (put_in_reg y)))))
 
+;;;; Rules for `select_spectre_guard` ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;; `isel` is a conditional move rather than a branch, so there is no
+;; mispredicted path for speculation to run down, which is what this
+;; operation requires. The rules mirror `select` above.
+(rule 1 (lower (select_spectre_guard (fits_in_64 (ty_int _))
+                                     (maybe_uextend (icmp _ cc a @ (value_type (fits_in_64 in_ty)) b))
+                                     x y))
+  (output_reg
+    (gen_select (int_compare cc
+                             (put_in_cmp_reg a cc in_ty)
+                             (put_in_cmp_reg b cc in_ty)
+                             in_ty)
+                (put_in_reg x)
+                (put_in_reg y))))
+
+(rule 0 (lower (select_spectre_guard (fits_in_64 (ty_int _)) c @ (value_type (fits_in_64 cty)) x y))
+  (output_reg
+    (gen_select (int_compare (IntCC.NotEqual)
+                             (put_in_cmp_reg c (IntCC.NotEqual) cty)
+                             (imm $I64 0)
+                             cty)
+                (put_in_reg x)
+                (put_in_reg y))))
+
 ;;;; Rules for floating-point `select` ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ;; `isel` only works on general registers, so both candidates are bounced
@@ -447,6 +472,9 @@
                           in_ty))))
 
 ;;;; Rules for branches ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(rule (lower_branch (br_table index _) targets)
+  (lower_br_table index targets))
 
 (rule (lower_branch (jump _) (single_target label))
   (emit_side_effect (ppc_jump label)))

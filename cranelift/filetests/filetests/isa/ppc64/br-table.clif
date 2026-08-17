@@ -1,0 +1,69 @@
+test compile precise-output
+target powerpc64le
+
+; The index is bounds-checked against the number of entries, then used to
+; index a table of `b` instructions that follows inline. Reading the PC
+; needs the `bcl`/`mflr` idiom, since PowerPC before POWER10 cannot compute
+; a PC-relative address directly.
+function %br_table(i32) -> i64 {
+block0(v0: i32):
+    br_table v0, block4, [block1, block2, block3]
+block1:
+    v1 = iconst.i64 1
+    return v1
+block2:
+    v2 = iconst.i64 2
+    return v2
+block3:
+    v3 = iconst.i64 3
+    return v3
+block4:
+    v4 = iconst.i64 -1
+    return v4
+}
+
+; VCode:
+; block0:
+;   br_table r3 # 3 targets
+; block1:
+;   load_const r3, 0x3
+;   blr
+; block2:
+;   load_const r3, 0x2
+;   blr
+; block3:
+;   load_const r3, 0x1
+;   blr
+; block4:
+;   load_const r3, 0xffffffffffffffff
+;   blr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   clrldi r7, r3, 0x20
+;   cmpldi r7, 3
+;   blt 0x10
+;   b 0x50
+;   bdnzl 0x14
+;   mflr r6
+;   sldi r7, r7, 2
+;   add r6, r6, r7
+;   addi r6, r6, 0x18
+;   mtctr r6
+;   bctr
+;   b 0x48
+;   b 0x40
+;   b 0x38
+; block1: ; offset 0x38
+;   li r3, 3
+;   blr
+; block2: ; offset 0x40
+;   li r3, 2
+;   blr
+; block3: ; offset 0x48
+;   li r3, 1
+;   blr
+; block4: ; offset 0x50
+;   li r3, -1
+;   blr
+

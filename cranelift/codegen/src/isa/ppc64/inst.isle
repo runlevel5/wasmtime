@@ -12,6 +12,7 @@
 (type AMode (primitive AMode))
 (type CondBrTarget (primitive CondBrTarget))
 (type FloatCompare (primitive FloatCompare))
+(type VecMachLabel extern (enum))
 
 ;; Integer ALU operations, register-register. The emitter maps these to
 ;; XO-form (add/subf/mull/div) or X-form (logicals) encodings.
@@ -361,6 +362,14 @@
       (rt Reg)
       (rf Reg))
 
+    ;; A jump table: a bounds check against the number of entries, then an
+    ;; indexed branch through a table of `b` instructions.
+    (BrTable
+      (index Reg)
+      (tmp1 WritableReg)
+      (tmp2 WritableReg)
+      (targets VecMachLabel))
+
     ;; Request a constant island of the given size. Used by the
     ;; return-value loads after a call, which can be arbitrarily long.
     (EmitIsland
@@ -637,6 +646,9 @@
   (let ((dst WritableReg (temp_writable_reg $I64))
         (_ Unit (emit (MInst.LabelAddress dst label))))
     dst))
+
+(decl lower_br_table (Reg MachLabelSlice) Unit)
+(extern constructor lower_br_table lower_br_table)
 
 ;; Branch helpers.
 (decl ppc_jump (MachLabel) SideEffectNoResult)
