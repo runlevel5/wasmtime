@@ -570,6 +570,29 @@ whether to gate SIMD/threads/tail-call proposals off in
 `compiler_panicking_wasm_features` for ppc64 (cleaner UX than compile
 errors), then a final clean suite run.
 
+### Gap-closure session (2026-08-19, Fable 5)
+
+**Spec suite on POWER9: 1954 passed, 0 failed** — every configuration
+(default, pooling, Null/DRC/Copying collectors, component-model 418/418).
+
+Implemented: tail calls (teardown mirrors riscv64; unlinked `b`/`bctr`;
+r12-pinned indirect target), atomics (larx/stcx. loops, POWER8 sub-word
+reservation forms, sync + ctrl/isync fencing per LLVM), rotates
+(rotlw/rldcl, hardware-masked amounts, rotr = rotl of negated amount),
+smin/smax/umin/umax, and gating of SIMD/relaxed-SIMD/wide-arithmetic in
+`compiler_panicking_wasm_features` + the wast harness (with a 4-file
+skip list for tests that use v128 unconditionally).
+
+**Miscompilation found by the suite:** `fpromote` of a signalling NaN
+passed the sNaN through (lfs/fmr preserve the quiet bit; x86's cvtss2sd
+quiets). Fixed by multiplying by 1.0 — exact, sign-of-zero-preserving,
+NaN-quieting. Worth a runtest when the f32-widened representation is
+next revisited.
+
+Remaining feature gaps (all declared, none failing): SIMD (Phase 5),
+i128/wide-arithmetic, f16/f128. Docs proposal table can now be filled
+from a truthful baseline.
+
 ### Phase 5 — SIMD via VSX (optional, +2–3 months)
 
 ~236 SIMD ops; POWER8 VSX covers most of wasm SIMD but the patch's SIMD
