@@ -245,6 +245,124 @@ impl Inst {
     }
 }
 
+/// `sync` (heavyweight) and `isync` barriers.
+const SYNC: u32 = (31 << 26) | (598 << 1);
+const ISYNC: u32 = (19 << 26) | (150 << 1);
+
+/// The larx/stcx. extended opcodes for each access size. POWER8 (ISA
+/// 2.07) provides the byte and halfword forms.
+fn larx_stcx_xo(ty: Type) -> (u32, u32) {
+    match ty {
+        I8 => (52, 694),
+        I16 => (116, 726),
+        I32 => (20, 150),
+        I64 => (84, 214),
+        _ => unreachable!(),
+    }
+}
+
+/// The frame teardown shared by both tail-call forms: restore the
+/// clobbered callee-saves, the return address (back into LR) and the
+/// frame pointer, then pop the frame down to the callee's expected
+/// incoming-argument size. The caller then branches without linking.
+///
+/// The sequence length depends on the clobber set, so it is emitted once
+/// into a throwaway buffer to size an island request, mirroring riscv64.
+fn emit_return_call_common_sequence<T>(
+    sink: &mut MachBuffer<Inst>,
+    emit_info: &EmitInfo,
+    state: &mut EmitState,
+    info: &ReturnCallInfo<T>,
+) {
+    let mut buffer = MachBuffer::new();
+    let mut fake_emit_state = state.clone();
+    return_call_emit_impl(&mut buffer, emit_info, &mut fake_emit_state, info);
+    let buffer = buffer.finish(&Default::default(), &mut Default::default());
+    let length = buffer.data().len() as u32;
+
+    if sink.island_needed(length) {
+        let jump_around_label = sink.get_label();
+        Inst::gen_jump(jump_around_label).emit(sink, emit_info, state);
+        sink.emit_island(length + 4, &mut state.ctrl_plane);
+        sink.bind_label(jump_around_label, &mut state.ctrl_plane);
+    }
+
+    return_call_emit_impl(sink, emit_info, state, info);
+}
+
+fn return_call_emit_impl<T>(
+    sink: &mut MachBuffer<Inst>,
+    emit_info: &EmitInfo,
+    state: &mut EmitState,
+    info: &ReturnCallInfo<T>,
+) {
+    let sp_to_fp_offset = {
+        let frame_layout = state.frame_layout();
+        i64::from(
+            frame_layout.clobber_size
+                + frame_layout.fixed_frame_storage_size
+                + frame_layout.outgoing_args_size,
+        )
+    };
+
+    // Restore the clobbered callee-saves, in the layout gen_clobber_save
+    // wrote them: descending from just below the frame record.
+    let mut clobber_offset = sp_to_fp_offset - 8;
+    for reg in state.frame_layout().clobbered_callee_saves.clone() {
+        let rreg = reg.to_reg();
+        let ty = match rreg.class() {
+            RegClass::Int => I64,
+            RegClass::Float => F64,
+            RegClass::Vector => {
+                unimplemented!("ppc64 vector clobber restores are not yet supported")
+            }
+        };
+        Inst::gen_load(
+            reg.map(Reg::from),
+            AMode::SPOffset(clobber_offset),
+            ty,
+            MemFlagsData::trusted(),
+        )
+        .emit(sink, emit_info, state);
+        clobber_offset -= 8;
+    }
+
+    // Restore the return address into LR, and the frame pointer.
+    let setup_area_size = i64::from(state.frame_layout().setup_area_size);
+    if setup_area_size > 0 {
+        Inst::gen_load(
+            Writable::from_reg(zero_scratch_reg()),
+            AMode::SPOffset(sp_to_fp_offset + 8),
+            I64,
+            MemFlagsData::trusted(),
+        )
+        .emit(sink, emit_info, state);
+        Inst::Mtlr {
+            rs: zero_scratch_reg(),
+        }
+        .emit(sink, emit_info, state);
+        Inst::gen_load(
+            writable_fp_reg(),
+            AMode::SPOffset(sp_to_fp_offset),
+            I64,
+            MemFlagsData::trusted(),
+        )
+        .emit(sink, emit_info, state);
+    }
+
+    // If the prologue over-allocated the incoming-argument area relative
+    // to what the callee expects, shrink back down to its size.
+    let incoming_args_diff =
+        i64::from(state.frame_layout().tail_args_size - info.new_stack_arg_size);
+
+    let sp_increment = sp_to_fp_offset + setup_area_size + incoming_args_diff;
+    if sp_increment > 0 {
+        for inst in Ppc64MachineDeps::gen_sp_reg_adjust(i32::try_from(sp_increment).unwrap()) {
+            inst.emit(sink, emit_info, state);
+        }
+    }
+}
+
 /// Emit `cmpdi`/`cmpwi` of `ra` against a signed 16-bit immediate, into cr0.
 fn emit_cmpi(sink: &mut MachBuffer<Inst>, ra: u32, imm: i16, is_64: bool) {
     sink.put4(enc_cmpi(11, 0, u32::from(is_64), ra, imm as u16));
@@ -367,6 +485,19 @@ impl MachInstEmit for Inst {
                 let rd = reg_num(rd.to_reg());
                 let ra = reg_num(ra);
                 let rb = reg_num(rb);
+                match op {
+                    // rotlw rd, ra, rb == rlwnm rd, ra, rb, 0, 31 (M-form).
+                    ShiftOp::Rotlw => {
+                        sink.put4((23 << 26) | (ra << 21) | (rd << 16) | (rb << 11) | (31 << 1));
+                        return;
+                    }
+                    // rotld rd, ra, rb == rldcl rd, ra, rb, 0 (MDS-form).
+                    ShiftOp::Rotld => {
+                        sink.put4((30 << 26) | (ra << 21) | (rd << 16) | (rb << 11) | (8 << 1));
+                        return;
+                    }
+                    _ => {}
+                }
                 let xo = match op {
                     ShiftOp::Slw => 24,
                     ShiftOp::Srw => 536,
@@ -374,6 +505,7 @@ impl MachInstEmit for Inst {
                     ShiftOp::Sld => 27,
                     ShiftOp::Srd => 539,
                     ShiftOp::Srad => 794,
+                    ShiftOp::Rotlw | ShiftOp::Rotld => unreachable!(),
                 };
                 sink.put4(enc_x_logic(ra, rd, rb, xo));
             }
@@ -983,6 +1115,180 @@ impl MachInstEmit for Inst {
                 if let Some(try_call) = info.try_call_info.as_ref() {
                     Inst::gen_jump(try_call.continuation).emit(sink, emit_info, state);
                 }
+            }
+
+            &Inst::AtomicLoad { rd, addr, ty } => {
+                let rd = reg_num(rd.to_reg());
+                let addr = reg_num(addr);
+                let load_xo = match ty {
+                    I8 => 87,   // lbzx
+                    I16 => 279, // lhzx
+                    I32 => 23,  // lwzx
+                    I64 => 21,  // ldx
+                    _ => unreachable!(),
+                };
+                sink.put4(SYNC);
+                sink.put4(enc_x(rd, 0, addr, load_xo));
+                // Control dependency + isync gives acquire ordering.
+                sink.put4(enc_cmp(0, 1, rd, rd, 0)); // cmpd rd, rd
+                sink.put4(enc_bc(bo_for(false), CR0_EQ, 4, false)); // bne .+4
+                sink.put4(ISYNC);
+            }
+
+            &Inst::AtomicStore { src, addr, ty } => {
+                let src = reg_num(src);
+                let addr = reg_num(addr);
+                let store_xo = match ty {
+                    I8 => 215,  // stbx
+                    I16 => 407, // sthx
+                    I32 => 151, // stwx
+                    I64 => 149, // stdx
+                    _ => unreachable!(),
+                };
+                sink.put4(SYNC);
+                sink.put4(enc_x(src, 0, addr, store_xo));
+            }
+
+            &Inst::AtomicRmw {
+                op,
+                rd,
+                addr,
+                src,
+                ty,
+            } => {
+                use crate::ir::AtomicRmwOp;
+                let rd_n = reg_num(rd.to_reg());
+                let addr = reg_num(addr);
+                let src_n = reg_num(src);
+                let (larx_xo, stcx_xo) = larx_stcx_xo(ty);
+
+                sink.put4(SYNC);
+                let loop_top = sink.get_label();
+                sink.bind_label(loop_top, &mut state.ctrl_plane);
+                sink.put4(enc_x(rd_n, 0, addr, larx_xo));
+
+                // Compute the replacement value into r0 (or use src
+                // directly for exchange).
+                let store_reg = match op {
+                    AtomicRmwOp::Xchg => src_n,
+                    AtomicRmwOp::Add => {
+                        sink.put4(enc_xo(0, rd_n, src_n, 266));
+                        0
+                    }
+                    AtomicRmwOp::Sub => {
+                        sink.put4(enc_xo(0, src_n, rd_n, 40)); // rd - src
+                        0
+                    }
+                    AtomicRmwOp::And => {
+                        sink.put4(enc_x_logic(rd_n, 0, src_n, 28));
+                        0
+                    }
+                    AtomicRmwOp::Or => {
+                        sink.put4(enc_x_logic(rd_n, 0, src_n, 444));
+                        0
+                    }
+                    AtomicRmwOp::Xor => {
+                        sink.put4(enc_x_logic(rd_n, 0, src_n, 316));
+                        0
+                    }
+                    AtomicRmwOp::Nand => {
+                        sink.put4(enc_x_logic(rd_n, 0, src_n, 476));
+                        0
+                    }
+                    AtomicRmwOp::Umin
+                    | AtomicRmwOp::Umax
+                    | AtomicRmwOp::Smin
+                    | AtomicRmwOp::Smax => {
+                        // The reservation loads zero-extend, and `src` was
+                        // pre-extended by the lowering rules, so unsigned
+                        // compares work at full width directly; signed
+                        // sub-doubleword compares sign-extend the loaded
+                        // value into r0 first.
+                        let signed =
+                            matches!(op, AtomicRmwOp::Smin | AtomicRmwOp::Smax);
+                        let cmp_lhs = if signed && ty != I64 {
+                            let ext_xo = match ty {
+                                I8 => 954,
+                                I16 => 922,
+                                I32 => 986,
+                                _ => unreachable!(),
+                            };
+                            sink.put4(enc_x_logic(rd_n, 0, 0, ext_xo));
+                            0
+                        } else {
+                            rd_n
+                        };
+                        let cmp_xo = if signed { 0 } else { 32 };
+                        sink.put4(enc_cmp(0, 1, cmp_lhs, src_n, cmp_xo));
+                        // Keep the loaded value when it is already the
+                        // min/max, otherwise take src.
+                        let keep_old = matches!(
+                            op,
+                            AtomicRmwOp::Umin | AtomicRmwOp::Smin
+                        );
+                        let bit = CR0_LT;
+                        let (a, b) = if keep_old {
+                            (rd_n, src_n)
+                        } else {
+                            (src_n, rd_n)
+                        };
+                        debug_assert!(a != 0 && b != 0);
+                        sink.put4(enc_isel(0, a, b, bit));
+                        0
+                    }
+                };
+
+                sink.put4(enc_x(store_reg, 0, addr, stcx_xo) | 1); // stcx., Rc=1
+                let bc_off = sink.cur_offset();
+                sink.use_label_at_offset(bc_off, loop_top, LabelUse::Branch16);
+                sink.put4(enc_bc(bo_for(false), CR0_EQ, 0, false)); // bne- loop
+                sink.put4(ISYNC);
+            }
+
+            &Inst::AtomicCas {
+                rd,
+                addr,
+                expected,
+                new,
+                ty,
+            } => {
+                let rd_n = reg_num(rd.to_reg());
+                let addr = reg_num(addr);
+                let expected = reg_num(expected);
+                let new = reg_num(new);
+                let (larx_xo, stcx_xo) = larx_stcx_xo(ty);
+
+                sink.put4(SYNC);
+                let loop_top = sink.get_label();
+                let done = sink.get_label();
+                sink.bind_label(loop_top, &mut state.ctrl_plane);
+                sink.put4(enc_x(rd_n, 0, addr, larx_xo));
+                // The reservation load zero-extends and `expected` was
+                // pre-zero-extended, so a full-width logical compare works
+                // for every type.
+                sink.put4(enc_cmp(0, 1, rd_n, expected, 32)); // cmpld
+                emit_bc_to_label(sink, done, CR0_EQ, false); // bne done
+                sink.put4(enc_x(new, 0, addr, stcx_xo) | 1); // stcx.
+                let bc_off = sink.cur_offset();
+                sink.use_label_at_offset(bc_off, loop_top, LabelUse::Branch16);
+                sink.put4(enc_bc(bo_for(false), CR0_EQ, 0, false)); // bne- loop
+                sink.bind_label(done, &mut state.ctrl_plane);
+                sink.put4(ISYNC);
+            }
+
+            &Inst::Fence => sink.put4(SYNC),
+
+            Inst::ReturnCall { info } => {
+                emit_return_call_common_sequence(sink, emit_info, state, info);
+                sink.add_call_site();
+                sink.add_reloc(Reloc::Ppc64Call, &info.dest, 0);
+                sink.put4(enc_b(0, false)); // b, not bl: LR is the original RA
+            }
+
+            Inst::ReturnCallInd { info } => {
+                emit_return_call_common_sequence(sink, emit_info, state, info);
+                sink.put4(enc_mtctr(reg_num(info.dest)));
+                sink.put4(enc_bctr(false)); // bctr, not bctrl
             }
 
             Inst::LoadExtName { rd, name, offset } => {

@@ -2465,6 +2465,14 @@ impl Config {
                         unsupported |= WasmFeatures::STACK_SWITCHING;
                     }
                 }
+
+                // The ppc64le backend does not implement vector or
+                // 128-bit-integer lowerings yet.
+                if let Architecture::Powerpc64le = self.compiler_target().architecture {
+                    unsupported |= WasmFeatures::SIMD
+                        | WasmFeatures::RELAXED_SIMD
+                        | WasmFeatures::WIDE_ARITHMETIC;
+                }
             }
             Some(Strategy::Winch) => {
                 // Exception handling in Winch is a work in progress. Throws currently

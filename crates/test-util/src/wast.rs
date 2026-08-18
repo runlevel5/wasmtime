@@ -450,6 +450,17 @@ impl Compiler {
                     return true;
                 }
 
+                // The ppc64le backend has no vector or 128-bit-integer
+                // lowerings yet; these proposals are force-disabled for it
+                // in `Config::compiler_panicking_wasm_features`.
+                if cfg!(target_arch = "powerpc64")
+                    && (config.simd()
+                        || config.relaxed_simd()
+                        || config.wide_arithmetic())
+                {
+                    return true;
+                }
+
                 false
             }
 
@@ -519,6 +530,22 @@ impl WastTest {
     pub fn should_fail(&self, config: &WastConfig) -> bool {
         if !config.compiler.supports_host() {
             return true;
+        }
+
+        // These tests use v128 types unconditionally, and SIMD is
+        // force-disabled on ppc64le until the backend grows vector
+        // lowerings, so they cannot pass there in any configuration.
+        #[cfg(target_arch = "powerpc64")]
+        if config.compiler == Compiler::CraneliftNative {
+            let requires_simd = [
+                "spec_testsuite/memory_copy.wast",
+                "spec_testsuite/memory_copy64.wast",
+                "misc_testsuite/canonicalize-nan-scalar.wast",
+                "misc_testsuite/gc/array-copy-non-gc-refs.wast",
+            ];
+            if requires_simd.iter().any(|part| self.path.ends_with(part)) {
+                return true;
+            }
         }
 
         // Some tests are known to fail with the pooling allocator

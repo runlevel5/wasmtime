@@ -128,6 +128,25 @@
                (gen_extend (put_in_reg x) true (ty_bits ty) 64)
                (mask_shift_amount y ty))))
 
+;;;; Rules for `rotl` / `rotr` ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;; The rotate instructions mask the amount to the width themselves, and a
+;; right-rotation is a left-rotation by the negated amount (which the
+;; hardware masking reduces mod the width).
+(rule (lower (rotl $I64 x y))
+  (output_reg (gen_shift (ShiftOp.Rotld) (put_in_reg x) (put_in_reg y))))
+
+(rule (lower (rotl $I32 x y))
+  (output_reg (gen_shift (ShiftOp.Rotlw) (put_in_reg x) (put_in_reg y))))
+
+(rule (lower (rotr $I64 x y))
+  (output_reg (gen_shift (ShiftOp.Rotld) (put_in_reg x)
+                         (gen_unary (UnaryOp.Neg) (put_in_reg y)))))
+
+(rule (lower (rotr $I32 x y))
+  (output_reg (gen_shift (ShiftOp.Rotlw) (put_in_reg x)
+                         (gen_unary (UnaryOp.Neg) (put_in_reg y)))))
+
 ;;;; Rules for bit counting ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (rule 1 (lower (clz (ty_32_or_64 ty) x))
@@ -322,10 +341,16 @@
 (rule (lower (fma (ty_scalar_float ty) x y z))
   (output_reg (fpu_fma (put_in_reg x) (put_in_reg y) (put_in_reg z) ty)))
 
-;; An `f32` is held in an FPR already widened to double, so widening it is
-;; a plain move; narrowing rounds with `frsp`.
+;; An `f32` is held in an FPR already widened to double, so promotion
+;; needs no conversion — but it must not be a plain move: wasm requires
+;; promoting a NaN to yield an arithmetic (quiet) NaN, and `lfs`/`fmr`
+;; preserve a signalling NaN's quiet bit. Multiplying by 1.0 is exact for
+;; every numeric value, preserves signed zeros, and quiets NaNs.
 (rule (lower (fpromote $F64 x))
-  (output_reg (fpu_rr (FpuOp1.Mov) (put_in_reg x) $F64)))
+  (output_reg (fpu_rrr (FpuOp2.Mul)
+                       (put_in_reg x)
+                       (mov_to_fpr (imm $I64 0x3FF0000000000000) $F64)
+                       $F64)))
 
 (rule (lower (fdemote $F32 x))
   (output_reg (fpu_rr (FpuOp1.Demote) (put_in_reg x) $F32)))
@@ -574,6 +599,35 @@
                               ty)
                  taken not_taken)))
 
+;;;; Rules for atomics ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(rule (lower (atomic_load (fits_in_64 (ty_int ty)) (little_or_native_endian _flags) p))
+  (output_reg (gen_atomic_load (put_in_reg p) ty)))
+
+(rule (lower (atomic_store (little_or_native_endian _flags)
+                           src @ (value_type (fits_in_64 (ty_int ty)))
+                           p))
+  (side_effect (gen_atomic_store (put_in_reg src) (put_in_reg p) ty)))
+
+(rule (lower (atomic_rmw (fits_in_64 (ty_int ty)) (little_or_native_endian _flags) op p x))
+  (output_reg (gen_atomic_rmw op (put_in_reg p) (atomic_rmw_src op ty x) ty)))
+
+(rule (lower (atomic_cas (fits_in_64 (ty_int ty)) (little_or_native_endian _flags) p e x))
+  (output_reg (gen_atomic_cas (put_in_reg p)
+                              (put_in_zext_reg e ty)
+                              (put_in_reg x)
+                              ty)))
+
+;; Zero-extend for the full-width compare against a zero-extending
+;; reservation load; i32 and i64 loads fill the compared width already.
+(decl put_in_zext_reg (Value Type) Reg)
+(rule 1 (put_in_zext_reg val (ty_32_or_64 _)) (put_in_reg val))
+(rule 0 (put_in_zext_reg val (fits_in_16 ty))
+  (gen_extend (put_in_reg val) false (ty_bits ty) 64))
+
+(rule (lower (fence))
+  (side_effect (SideEffectNoResult.Inst (MInst.Fence))))
+
 ;;;; Rules for `stack_addr` ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (rule (lower (stack_addr _ ss offset))
@@ -687,6 +741,29 @@
 
 (rule (lower (get_exception_handler_address _ block (u64_from_imm64 idx)))
   (output_reg (ppc_label_address (block_exn_successor_label block idx))))
+
+;;;; Rules for `return_call` and `return_call_indirect` ;;;;;;;;;;;;;;;;;;;;
+
+(rule 1 (lower (return_call (func_ref_data sig_ref name (RelocDistance.Near) false) args))
+  (let ((abi Sig (abi_sig sig_ref))
+        (uses CallArgList (gen_return_call_args abi args))
+        (info BoxReturnCallInfo (gen_return_call_info abi name uses)))
+    (side_effect (SideEffectNoResult.Inst (MInst.ReturnCall info)))))
+
+;; Out of range: via the absolute address, like ordinary far calls.
+(rule (lower (return_call (func_ref_data sig_ref name _dist false) args))
+  (let ((abi Sig (abi_sig sig_ref))
+        (uses CallArgList (gen_return_call_args abi args))
+        (target Reg (load_ext_name name 0))
+        (info BoxReturnCallIndInfo (gen_return_call_ind_info abi target uses)))
+    (side_effect (SideEffectNoResult.Inst (MInst.ReturnCallInd info)))))
+
+(rule (lower (return_call_indirect sig_ref ptr args))
+  (let ((abi Sig (abi_sig sig_ref))
+        (target Reg (put_in_reg ptr))
+        (uses CallArgList (gen_return_call_args abi args))
+        (info BoxReturnCallIndInfo (gen_return_call_ind_info abi target uses)))
+    (side_effect (SideEffectNoResult.Inst (MInst.ReturnCallInd info)))))
 
 ;; Load the absolute address of an external symbol.
 (decl load_ext_name (ExternalName i64) Reg)

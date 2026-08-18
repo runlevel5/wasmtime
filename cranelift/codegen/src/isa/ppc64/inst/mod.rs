@@ -33,6 +33,15 @@ pub use crate::isa::ppc64::lower::isle::generated_code::{
     UnaryOp,
 };
 
+/// Additional information for `return_call[_ind]` instructions, left out
+/// of line to lower the size of the `Inst` enum.
+#[derive(Clone, Debug)]
+pub struct ReturnCallInfo<T> {
+    pub dest: T,
+    pub uses: CallArgList,
+    pub new_stack_arg_size: u32,
+}
+
 impl Inst {
     /// Generic constructor for a load (zero-extending where appropriate).
     pub fn gen_load(into_reg: Writable<Reg>, mem: AMode, ty: Type, flags: MemFlagsData) -> Inst {
@@ -223,6 +232,47 @@ fn ppc64_get_operands(inst: &mut Inst, collector: &mut impl OperandVisitor) {
                 try_call_info.collect_operands(collector);
             }
         }
+        Inst::AtomicLoad { rd, addr, .. } => {
+            collector.reg_use(addr);
+            collector.reg_def(rd);
+        }
+        Inst::AtomicStore { src, addr, .. } => {
+            collector.reg_use(src);
+            collector.reg_use(addr);
+        }
+        Inst::AtomicRmw { rd, addr, src, .. } => {
+            collector.reg_use(addr);
+            collector.reg_use(src);
+            // The loop re-reads addr and src after rd is written.
+            collector.reg_early_def(rd);
+        }
+        Inst::AtomicCas {
+            rd,
+            addr,
+            expected,
+            new,
+            ..
+        } => {
+            collector.reg_use(addr);
+            collector.reg_use(expected);
+            collector.reg_use(new);
+            collector.reg_early_def(rd);
+        }
+        Inst::Fence => {}
+        Inst::ReturnCall { info } => {
+            for CallArgPair { vreg, preg } in &mut info.uses {
+                collector.reg_fixed_use(vreg, *preg);
+            }
+        }
+        Inst::ReturnCallInd { info } => {
+            // r12 is a volatile non-argument register, so it cannot
+            // collide with the fixed argument constraints; it is also
+            // what the ELFv2 global-entry convention wants.
+            collector.reg_fixed_use(&mut info.dest, call_target_reg());
+            for CallArgPair { vreg, preg } in &mut info.uses {
+                collector.reg_fixed_use(vreg, *preg);
+            }
+        }
         Inst::LoadExtName { rd, .. }
         | Inst::LabelAddress { rd, .. }
         | Inst::MovFromPReg { rd, .. } => collector.reg_def(rd),
@@ -302,6 +352,7 @@ impl MachInst for Inst {
     fn call_type(&self) -> CallType {
         match self {
             Inst::Call { .. } | Inst::CallInd { .. } => CallType::Regular,
+            Inst::ReturnCall { .. } | Inst::ReturnCallInd { .. } => CallType::TailCall,
             _ => CallType::None,
         }
     }
@@ -313,6 +364,7 @@ impl MachInst for Inst {
             | Inst::FpuCondBr { .. }
             | Inst::BrTable { .. } => MachTerminator::Branch,
             Inst::Rets { .. } => MachTerminator::Ret,
+            Inst::ReturnCall { .. } | Inst::ReturnCallInd { .. } => MachTerminator::RetCall,
             Inst::Call { info } if info.try_call_info.is_some() => MachTerminator::Branch,
             Inst::CallInd { info } if info.try_call_info.is_some() => MachTerminator::Branch,
             _ => MachTerminator::None,
@@ -446,6 +498,8 @@ impl Inst {
                     ShiftOp::Sld => "sld",
                     ShiftOp::Srd => "srd",
                     ShiftOp::Srad => "srad",
+                    ShiftOp::Rotlw => "rotlw",
+                    ShiftOp::Rotld => "rotld",
                 };
                 format!("{mnemonic} {}, {}, {}", wreg(*rd), reg(*ra), reg(*rb))
             }
@@ -653,7 +707,43 @@ impl Inst {
                 reg(kind.rs1),
                 reg(kind.rs2)
             ),
+            Inst::AtomicLoad { rd, addr, ty } => {
+                format!("atomic_load.{ty} {}, ({})", wreg(*rd), reg(*addr))
+            }
+            Inst::AtomicStore { src, addr, ty } => {
+                format!("atomic_store.{ty} {}, ({})", reg(*src), reg(*addr))
+            }
+            Inst::AtomicRmw {
+                op,
+                rd,
+                addr,
+                src,
+                ty,
+            } => format!(
+                "atomic_rmw.{ty} {op:?} {}, {}, ({})",
+                wreg(*rd),
+                reg(*src),
+                reg(*addr)
+            ),
+            Inst::AtomicCas {
+                rd,
+                addr,
+                expected,
+                new,
+                ty,
+            } => format!(
+                "atomic_cas.{ty} {}, {}, {}, ({})",
+                wreg(*rd),
+                reg(*expected),
+                reg(*new),
+                reg(*addr)
+            ),
+            Inst::Fence => "sync".to_string(),
             Inst::Call { info } => format!("bl {:?}", info.dest),
+            Inst::ReturnCall { info } => format!("return_call {:?}", info.dest),
+            Inst::ReturnCallInd { info } => {
+                format!("mtctr {}; bctr # tail call", reg(info.dest))
+            }
             Inst::CallInd { info } => format!("mtctr {}; bctrl", reg(info.dest)),
             Inst::LoadExtName { rd, name, offset } => {
                 format!("load_ext_name {}, {name:?}+{offset}", wreg(*rd))

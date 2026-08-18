@@ -22,6 +22,8 @@ use regalloc2::PReg;
 
 type BoxCallInfo = Box<CallInfo<ExternalName>>;
 type BoxCallIndInfo = Box<CallInfo<Reg>>;
+type BoxReturnCallInfo = Box<ReturnCallInfo<ExternalName>>;
+type BoxReturnCallIndInfo = Box<ReturnCallInfo<Reg>>;
 type BoxExternalName = Box<ExternalName>;
 type VecArgPair = Vec<ArgPair>;
 type VecRetPair = Vec<RetPair>;
@@ -95,6 +97,40 @@ impl generated_code::Context for Ppc64IsleContext<'_, '_, MInst, Ppc64Backend> {
         )
     }
 
+    fn gen_return_call_info(
+        &mut self,
+        sig: Sig,
+        dest: ExternalName,
+        uses: CallArgList,
+    ) -> BoxReturnCallInfo {
+        let new_stack_arg_size = self.lower_ctx.sigs()[sig].sized_stack_arg_space();
+        self.lower_ctx
+            .abi_mut()
+            .accumulate_tail_args_size(new_stack_arg_size);
+        Box::new(ReturnCallInfo {
+            dest,
+            uses,
+            new_stack_arg_size,
+        })
+    }
+
+    fn gen_return_call_ind_info(
+        &mut self,
+        sig: Sig,
+        dest: Reg,
+        uses: CallArgList,
+    ) -> BoxReturnCallIndInfo {
+        let new_stack_arg_size = self.lower_ctx.sigs()[sig].sized_stack_arg_space();
+        self.lower_ctx
+            .abi_mut()
+            .accumulate_tail_args_size(new_stack_arg_size);
+        Box::new(ReturnCallInfo {
+            dest,
+            uses,
+            new_stack_arg_size,
+        })
+    }
+
     fn amode(&mut self, addr: Value, offset: i32) -> AMode {
         AMode::RegOffset(self.put_in_reg(addr), i64::from(offset))
     }
@@ -158,6 +194,29 @@ impl generated_code::Context for Ppc64IsleContext<'_, '_, MInst, Ppc64Backend> {
 
     fn ty_width_bit(&mut self, ty: Type) -> u64 {
         1u64 << ty.bits()
+    }
+
+    fn atomic_rmw_src(&mut self, op: &AtomicRmwOp, ty: Type, val: Value) -> Reg {
+        // Only the min/max comparisons look at bits above the type's
+        // width, so only they need the operand extended.
+        let src = self.put_in_reg(val);
+        let (signed, needs_ext) = match op {
+            AtomicRmwOp::Smin | AtomicRmwOp::Smax => (true, ty != I64),
+            AtomicRmwOp::Umin | AtomicRmwOp::Umax => (false, ty != I64),
+            _ => return src,
+        };
+        if !needs_ext {
+            return src;
+        }
+        let dst = self.temp_writable_reg(I64);
+        self.lower_ctx.emit(MInst::Extend {
+            rd: dst,
+            rn: src,
+            signed,
+            from_bits: ty.bits() as u8,
+            to_bits: 64,
+        });
+        dst.to_reg()
     }
 
     fn gen_stack_addr(&mut self, slot: StackSlot, offset: Offset32) -> Reg {

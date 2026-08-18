@@ -8,6 +8,8 @@
 ;; machinst code.
 (type BoxCallInfo (primitive BoxCallInfo))
 (type BoxCallIndInfo (primitive BoxCallIndInfo))
+(type BoxReturnCallInfo (primitive BoxReturnCallInfo))
+(type BoxReturnCallIndInfo (primitive BoxReturnCallIndInfo))
 (type IntegerCompare (primitive IntegerCompare))
 (type AMode (primitive AMode))
 (type CondBrTarget (primitive CondBrTarget))
@@ -53,6 +55,9 @@
     (Sld)
     (Srd)
     (Srad)
+    ;; Rotates; the amount is masked by the hardware to the width.
+    (Rotlw)
+    (Rotld)
 ))
 
 ;; Single-operand integer operations.
@@ -357,6 +362,54 @@
     (CallInd
       (info BoxCallIndInfo))
 
+    ;; A sequentially consistent atomic load: `sync; load; cmp; bc .+4;
+    ;; isync` (the compare/branch forms the control dependency the isync
+    ;; needs, the pattern the kernel and LLVM use).
+    (AtomicLoad
+      (rd WritableReg)
+      (addr Reg)
+      (ty Type))
+
+    ;; A sequentially consistent atomic store: `sync; store`.
+    (AtomicStore
+      (src Reg)
+      (addr Reg)
+      (ty Type))
+
+    ;; An atomic read-modify-write: a `sync`-fenced larx/stcx. loop, with
+    ;; the update computed into r0 each iteration. POWER8 has byte and
+    ;; halfword reservation forms, so no sub-word masking loop is needed.
+    ;; For the min/max operations `src` is pre-extended by the lowering
+    ;; rules; the loaded value is extended in the loop as required.
+    (AtomicRmw
+      (op AtomicRmwOp)
+      (rd WritableReg)
+      (addr Reg)
+      (src Reg)
+      (ty Type))
+
+    ;; An atomic compare-and-swap: larx; compare with `expected`
+    ;; (pre-zero-extended for sub-word types, matching the zero-extending
+    ;; reservation loads); store `new` if equal.
+    (AtomicCas
+      (rd WritableReg)
+      (addr Reg)
+      (expected Reg)
+      (new Reg)
+      (ty Type))
+
+    ;; A full memory barrier (`sync`).
+    (Fence)
+
+    ;; A direct tail call: tear the frame down and branch (`b`, not
+    ;; `bl`) with LR already restored to the original return address.
+    (ReturnCall
+      (info BoxReturnCallInfo))
+
+    ;; An indirect tail call, via CTR with the target pinned to r12.
+    (ReturnCallInd
+      (info BoxReturnCallIndInfo))
+
     ;; Load the address of an external symbol. Emitted as a `bcl 20,31,+4;
     ;; mflr rd; ld rd, 12(rd); b +12; .quad sym` sequence: the 8-byte
     ;; island carries an Abs8 relocation, which every object/JIT consumer
@@ -428,6 +481,12 @@
 
 (decl gen_call_ind_info (Sig Reg CallArgList CallRetList OptionTryCallInfo) BoxCallIndInfo)
 (extern constructor gen_call_ind_info gen_call_ind_info)
+
+(decl gen_return_call_info (Sig ExternalName CallArgList) BoxReturnCallInfo)
+(extern constructor gen_return_call_info gen_return_call_info)
+
+(decl gen_return_call_ind_info (Sig Reg CallArgList) BoxReturnCallIndInfo)
+(extern constructor gen_return_call_ind_info gen_return_call_ind_info)
 
 ;;;; Internal constructor helpers ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -685,6 +744,34 @@
 
 (decl lower_br_table (Reg MachLabelSlice) Unit)
 (extern constructor lower_br_table lower_br_table)
+
+;; Atomic helpers.
+(decl gen_atomic_load (Reg Type) Reg)
+(rule (gen_atomic_load addr ty)
+  (let ((dst WritableReg (temp_writable_reg $I64))
+        (_ Unit (emit (MInst.AtomicLoad dst addr ty))))
+    dst))
+
+(decl gen_atomic_store (Reg Reg Type) SideEffectNoResult)
+(rule (gen_atomic_store src addr ty)
+  (SideEffectNoResult.Inst (MInst.AtomicStore src addr ty)))
+
+(decl gen_atomic_rmw (AtomicRmwOp Reg Reg Type) Reg)
+(rule (gen_atomic_rmw op addr src ty)
+  (let ((dst WritableReg (temp_writable_reg $I64))
+        (_ Unit (emit (MInst.AtomicRmw op dst addr src ty))))
+    dst))
+
+(decl gen_atomic_cas (Reg Reg Reg Type) Reg)
+(rule (gen_atomic_cas addr expected new ty)
+  (let ((dst WritableReg (temp_writable_reg $I64))
+        (_ Unit (emit (MInst.AtomicCas dst addr expected new ty))))
+    dst))
+
+;; Extend `src` for an atomic min/max: the compare inside the loop is
+;; done at full width against the zero-extended loaded value.
+(decl atomic_rmw_src (AtomicRmwOp Type Value) Reg)
+(extern constructor atomic_rmw_src atomic_rmw_src)
 
 ;; Branch helpers.
 (decl ppc_jump (MachLabel) SideEffectNoResult)

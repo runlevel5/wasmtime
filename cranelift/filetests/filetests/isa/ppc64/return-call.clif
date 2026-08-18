@@ -1,0 +1,126 @@
+test compile precise-output
+target powerpc64le
+
+; Tail calls tear the frame down (clobbers, return address back into LR,
+; frame pointer), shrink the incoming-argument area to the callee's size,
+; and branch without linking.
+function %tail_direct(i64) -> i64 tail {
+    fn0 = colocated %callee(i64) -> i64 tail
+block0(v0: i64):
+    return_call fn0(v0)
+}
+
+; VCode:
+;   mflr r0
+;   load_addr sp, -16(sp)
+;   std r0, 8(sp)
+;   std fp, 0(sp)
+;   mr fp, sp
+; block0:
+;   return_call TestCase(%callee)
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   mflr r0
+;   addi r1, r1, -0x10
+;   std r0, 8(r1)
+;   std r31, 0(r1)
+;   ori r31, r1, 0
+; block1: ; offset 0x14
+;   ld r0, 8(r1)
+;   mtlr r0
+;   ld r31, 0(r1)
+;   addi r1, r1, 0x10
+;   b 0x24 ; reloc_external Call %callee 0
+
+function %tail_indirect(i64, i64) -> i64 tail {
+    sig0 = (i64) -> i64 tail
+block0(v0: i64, v1: i64):
+    return_call_indirect sig0, v1(v0)
+}
+
+; VCode:
+;   mflr r0
+;   load_addr sp, -16(sp)
+;   std r0, 8(sp)
+;   std fp, 0(sp)
+;   mr fp, sp
+; block0:
+;   mr r12, r4
+;   mtctr r12; bctr # tail call
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   mflr r0
+;   addi r1, r1, -0x10
+;   std r0, 8(r1)
+;   std r31, 0(r1)
+;   ori r31, r1, 0
+; block1: ; offset 0x14
+;   ori r12, r4, 0
+;   ld r0, 8(r1)
+;   mtlr r0
+;   ld r31, 0(r1)
+;   addi r1, r1, 0x10
+;   mtctr r12
+;   bctr
+
+function %tail_stack_args(i64) -> i64 tail {
+    fn0 = colocated %callee16(i64, i64, i64, i64, i64, i64, i64, i64, i64, i64) -> i64 tail
+block0(v0: i64):
+    return_call fn0(v0, v0, v0, v0, v0, v0, v0, v0, v0, v0)
+}
+
+; VCode:
+;   mflr r0
+;   load_addr sp, -16(sp)
+;   std r0, 8(sp)
+;   std fp, 0(sp)
+;   mr fp, sp
+;   load_addr sp, -48(sp)
+;   ld r0, 56(sp)
+;   std r0, 8(sp)
+;   ld fp, 48(sp)
+;   std fp, 0(sp)
+;   mr fp, sp
+; block0:
+;   std r3, 16(incoming_arg)
+;   std r3, 8(incoming_arg)
+;   mr r10, r3
+;   mr r4, r10
+;   mr r5, r10
+;   mr r6, r10
+;   mr r7, r10
+;   mr r8, r10
+;   mr r9, r10
+;   return_call TestCase(%callee16)
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   mflr r0
+;   addi r1, r1, -0x10
+;   std r0, 8(r1)
+;   std r31, 0(r1)
+;   ori r31, r1, 0
+;   addi r1, r1, -0x30
+;   ld r0, 0x38(r1)
+;   std r0, 8(r1)
+;   ld r31, 0x30(r1)
+;   std r31, 0(r1)
+;   ori r31, r1, 0
+; block1: ; offset 0x2c
+;   std r3, 0x30(r1)
+;   std r3, 0x38(r1)
+;   ori r10, r3, 0
+;   ori r4, r10, 0
+;   ori r5, r10, 0
+;   ori r6, r10, 0
+;   ori r7, r10, 0
+;   ori r8, r10, 0
+;   ori r9, r10, 0
+;   ld r0, 8(r1)
+;   mtlr r0
+;   ld r31, 0(r1)
+;   addi r1, r1, 0x10
+;   b 0x60 ; reloc_external Call %callee16 0
+

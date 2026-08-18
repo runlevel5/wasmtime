@@ -180,12 +180,14 @@ block0:
 ;   std fp, 0(sp)
 ;   mr fp, sp
 ; block0:
-;   load_const r4, 0x4025000000000000
-;   mtvsrd f6, r4
-;   load_const r4, 0x4000000000000000
-;   mtvsrd f7, r4
-;   fmr.f64 f5, f7
-;   fadd.f64 f1, f6, f5
+;   load_const r6, 0x4025000000000000
+;   mtvsrd f8, r6
+;   load_const r6, 0x4000000000000000
+;   mtvsrd f9, r6
+;   load_const r5, 0x3ff0000000000000
+;   mtvsrd f7, r5
+;   fmul.f64 f9, f9, f7
+;   fadd.f64 f1, f8, f9
 ;   ld r0, 8(sp)
 ;   mtlr r0
 ;   ld fp, 0(sp)
@@ -200,14 +202,17 @@ block0:
 ;   std r31, 0(r1)
 ;   ori r31, r1, 0
 ; block1: ; offset 0x14
-;   lis r4, 0x4025
-;   sldi r4, r4, 0x20
-;   mtvsrd f6, r4
-;   lis r4, 0x4000
-;   sldi r4, r4, 0x20
-;   mtvsrd f7, r4
-;   fmr f5, f7
-;   fadd f1, f6, f5
+;   lis r6, 0x4025
+;   sldi r6, r6, 0x20
+;   mtvsrd f8, r6
+;   lis r6, 0x4000
+;   sldi r6, r6, 0x20
+;   mtvsrd f9, r6
+;   lis r5, 0x3ff0
+;   sldi r5, r5, 0x20
+;   mtvsrd f7, r5
+;   fmul f9, f9, f7
+;   fadd f1, f8, f9
 ;   ld r0, 8(r1)
 ;   mtlr r0
 ;   ld r31, 0(r1)
@@ -228,8 +233,10 @@ block0(v0: f64):
 ;   std fp, 0(sp)
 ;   mr fp, sp
 ; block0:
-;   frsp.f32 f3, f1
-;   fmr.f64 f1, f3
+;   frsp.f32 f5, f1
+;   load_const r3, 0x3ff0000000000000
+;   mtvsrd f6, r3
+;   fmul.f64 f1, f5, f6
 ;   ld r0, 8(sp)
 ;   mtlr r0
 ;   ld fp, 0(sp)
@@ -244,8 +251,11 @@ block0(v0: f64):
 ;   std r31, 0(r1)
 ;   ori r31, r1, 0
 ; block1: ; offset 0x14
-;   frsp f3, f1
-;   fmr f1, f3
+;   frsp f5, f1
+;   lis r3, 0x3ff0
+;   sldi r3, r3, 0x20
+;   mtvsrd f6, r3
+;   fmul f1, f5, f6
 ;   ld r0, 8(r1)
 ;   mtlr r0
 ;   ld r31, 0(r1)
