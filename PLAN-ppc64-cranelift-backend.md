@@ -593,6 +593,32 @@ Remaining feature gaps (all declared, none failing): SIMD (Phase 5),
 i128/wide-arithmetic, f16/f128. Docs proposal table can now be filled
 from a truthful baseline.
 
+### Phase 4 — complete (2026-08-19)
+
+Everything in Phase 4 is now done:
+
+- Runtests: 70 shared runtests enabled and executing on ppc64le.
+- Spec suite: **1954/1954** on POWER9 across default, pooling and all
+  three GC collectors; component-model 418/418.
+- CI: qemu-ppc64le test job (`isa: "ppc64"`, filter `linux-ppc64le`);
+  ppc64 added to the no_std codegen check; loongarch64 took over as the
+  "no Cranelift backend" canary; release-artifact build + Dockerfile.
+- Fuzzing: `ALL_ARCHITECTURES` now lists `powerpc64le`, so the
+  `cranelift-icache` target fuzzes ppc64le from any host. fuzzgen knows
+  there are no vector lowerings and has an op exclusion list.
+  **Caveat:** i128 still enters through generated *signatures*, which an
+  op-level list cannot filter. The icache target discards compile errors
+  (`Err(_) => return`), so this lowers fuzz yield rather than causing
+  failures, and it disappears when i128 lands. A synthetic harness run
+  against `FuzzGen` confirmed this is the only leak path reaching the
+  backend.
+- Docs: per-proposal table filled from the measured run, not estimates;
+  tier entry now lacks only a full-time maintainer.
+
+**Phase 4 done. Remaining declared gaps:** SIMD (Phase 5), i128 /
+wide-arithmetic, f16/f128, and `stack-switching` (x86_64-unix only
+upstream). Phase 7 (big-endian) unchanged.
+
 ### Phase 5 — SIMD via VSX (optional, +2–3 months)
 
 ~236 SIMD ops; POWER8 VSX covers most of wasm SIMD but the patch's SIMD
