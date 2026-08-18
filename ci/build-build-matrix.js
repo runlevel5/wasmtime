@@ -38,6 +38,12 @@ const array = [
     "env": { "DOCKER_IMAGE": "./ci/docker/riscv64gc-linux/Dockerfile" },
   },
   {
+    "build": "ppc64le-linux",
+    "os": ubuntu,
+    "target": "powerpc64le-unknown-linux-gnu",
+    "env": { "DOCKER_IMAGE": "./ci/docker/ppc64le-linux/Dockerfile" },
+  },
+  {
     "build": "x86_64-macos",
     "os": macos,
     "target": "x86_64-apple-darwin",

@@ -310,6 +310,36 @@ here is:
 | [`exception-handling`]                  | ✅        | ❌     |
 | [`stack-switching`]                     | ❌        | ❌     |
 
+##### ppc64le
+
+Vector support is not implemented in the ppc64le backend yet, so the `simd`
+and `relaxed-simd` proposals, along with `wide-arithmetic` (which needs
+128-bit integers), are reported as unsupported rather than failing at
+compile time.
+
+| Feature                                 | Cranelift | Winch  |
+|-----------------------------------------|-----------|--------|
+| [`mutable-globals`]                     | ✅        | ❌     |
+| [`sign-extension-ops`]                  | ✅        | ❌     |
+| [`nontrapping-float-to-int-conversion`] | ✅        | ❌     |
+| [`multi-value`]                         | ✅        | ❌     |
+| [`bulk-memory`]                         | ✅        | ❌     |
+| [`reference-types`]                     | ✅        | ❌     |
+| [`simd`]                                | ❌        | ❌     |
+| [`component-model`]                     | ✅        | ❌     |
+| [`relaxed-simd`]                        | ❌        | ❌     |
+| [`multi-memory`]                        | ✅        | ❌     |
+| [`threads`]                             | ✅        | ❌     |
+| [`tail-call`]                           | ✅        | ❌     |
+| [`extended-const`]                      | ✅        | ❌     |
+| [`memory64`]                            | ✅        | ❌     |
+| [`function-references`]                 | ✅        | ❌     |
+| [`gc`]                                  | ✅        | ❌     |
+| [`wide-arithmetic`]                     | ❌        | ❌     |
+| [`custom-page-sizes`]                   | ✅        | ❌     |
+| [`exception-handling`]                  | ✅        | ❌     |
+| [`stack-switching`]                     | ❌        | ❌     |
+
 ##### Pulley
 
 Note that the pulley "architecture" is a stand-in for Wasmtime's baseline

@@ -665,6 +665,50 @@ fn valid_for_target(triple: &Triple, op: Opcode, args: &[Type], rets: &[Type]) -
             )
         }
 
+        Architecture::Powerpc64le => {
+            exceptions!(
+                op,
+                args,
+                rets,
+                // The ppc64le backend has no 128-bit integer lowerings.
+                (_, &[I128], _),
+                (_, &[_, I128], _),
+                (_, &[I128, _], _),
+                (_, _, &[I128]),
+                // Nor f16/f128.
+                (_, &[F16 | F128], _),
+                (_, &[_, F16 | F128], _),
+                (_, &[F16 | F128, _], _),
+                (_, _, &[F16 | F128]),
+                // Not yet lowered.
+                (Opcode::UaddOverflow | Opcode::SaddOverflow),
+                (Opcode::UsubOverflow | Opcode::SsubOverflow),
+                (Opcode::UmulOverflow | Opcode::SmulOverflow),
+                (Opcode::Bitrev),
+                (Opcode::Bswap),
+                (Opcode::Iabs),
+                (Opcode::Bitselect),
+                (Opcode::Ceil | Opcode::Floor | Opcode::Trunc | Opcode::Nearest),
+                // Narrow div/rem is lowered, but i8/i16 min/max of floats
+                // and the sub-word conversions are not exercised yet.
+                (
+                    Opcode::FcvtToUint | Opcode::FcvtToSint,
+                    &[F32 | F64],
+                    &[I8 | I16]
+                ),
+                (
+                    Opcode::FcvtToUintSat | Opcode::FcvtToSintSat,
+                    &[F32 | F64],
+                    &[I8 | I16]
+                ),
+                (
+                    Opcode::FcvtFromUint | Opcode::FcvtFromSint,
+                    &[I8 | I16],
+                    &[F32 | F64]
+                ),
+            )
+        }
+
         Architecture::Riscv64(_) => {
             exceptions!(
                 op,
