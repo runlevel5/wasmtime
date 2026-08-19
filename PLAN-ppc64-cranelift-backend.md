@@ -707,6 +707,47 @@ constant-materialisation sequences), egraph-visible lowering improvements,
 benchmarking vs Pulley (the backend must beat the interpreter convincingly
 to justify itself).
 
+#### Measurement first (2026-08-19)
+
+Benchmarked native ppc64le against Pulley on the POWER9 with all VMs shut
+down, five workloads, AOT-compiled so compile time is excluded, the 5 ms
+process-startup floor subtracted:
+
+| workload | native | pulley | ratio | exercises |
+|---|---|---|---|---|
+| `intloop` | 33 ms | 620 ms | 19x | mul/xor/rotate/divide |
+| `memsum` | 9 ms | 280 ms | 31x | 32 MiB of loads and stores |
+| `fib` | 12 ms | 202 ms | 17x | calls, recursion |
+| `wide` | 7 ms | 107 ms | 15x | i128 carry chains |
+| `floatloop` | 37 ms | 488 ms | 13x | FP arithmetic, native `nearest` |
+
+So the "must beat the interpreter convincingly" bar is cleared by a wide
+margin, and these numbers are the concrete justification to put in front
+of maintainers in Phase 0. Measurement noise is around 10%, which bounds
+what any tuning claim below can honestly assert.
+
+**`setb` is not worth doing.** It would shorten `cmp_set` (currently
+`cmp` + `li` + `li` + `isel`) by one instruction, but `cmp_set` only
+fires when an `icmp` result is materialized as a value, and the lowering
+rules already fuse `icmp` into `brif` and `select`. Disassembling all
+five workloads found **zero `isel` instructions**: the path `setb` would
+optimize never executes in this code. Recorded here so nobody re-derives
+it.
+
+**Instruction count is the wrong lever on this core.** Constant shifts
+now use the rotate-and-mask immediate forms, removing three of the 27
+instructions in `intloop`'s hot loop -- and wall-clock time did not
+change at all. The deleted `li`s were independent of the loop's
+dependency chain, which is what a wide out-of-order POWER9 is actually
+limited by. The same reasoning applies to the ten instructions of
+loop-invariant 64-bit constant materialization sitting in that loop
+(`lis`/`ori`/`sldi`/`oris`/`ori` twice over, because the mid-end
+rematerializes constants at their use sites): they are equally off the
+critical path, so a constant-pool load would likely not help either, and
+would add memory traffic. Any future tuning should target dependency
+chains or memory behaviour, and must be measured -- given ~10% noise,
+an 11% instruction reduction is not even detectable here.
+
 ### Phase 7 — Big-endian ppc64: ELFv2-BE, then ELFv1 (≈2–4 months)
 
 **Targets and ABI selection.** Big-endian is
