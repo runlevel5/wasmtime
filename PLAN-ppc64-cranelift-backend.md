@@ -695,6 +695,62 @@ post-mortems:
 
 ### Phase 5 — SIMD via VSX (optional, +2–3 months)
 
+#### Foundations laid (2026-08-20) — design decisions binding on all rules
+
+1. **Lane order is little-endian in the register.** Wasm lane 0 lives in
+   the least-significant bits; memory byte 0 at the LSB end. `bitcast`
+   between `i64x2` lane 0 and a scalar is the identity, and lane `i` of
+   `iNxM` sits at memory offset `i*N/8`. PPC numbers vector elements
+   big-endian (element 0 = MSB), so *lane-indexed instructions* translate
+   the index (`lane_count-1 - lane`); nothing else ever sees the
+   difference. Memory ops enforce the layout: `lxvx`/`stxvx` on ISA 3.0,
+   `lxvd2x`/`stxvd2x` + `xxswapd` on the POWER8 baseline. All forms are
+   alignment-free (never `lvx`/`stvx`, which silently mask the address).
+2. **v0 is the reserved vector emission scratch.** The P8 store path
+   must byte-swap somewhere, and spill stores are generated where no
+   temporary can be allocated. It must be a *volatile* register: the
+   first draft reserved v31, but the scratch use is invisible to
+   regalloc, and ELFv2 makes v31 callee-saved — a native caller keeping
+   a value there across a call into JIT code would have been silently
+   corrupted. v1-v19 volatile allocatable, v20-v31 callee-saved
+   allocatable (now in `DEFAULT_CALLEE_SAVES`; the clobber save/restore
+   loops handle 16-byte slots through the same `VecStore`/`VecLoad`).
+3. **Register class stays split: `Vector` = VRs (VSR32-63) only.** VSX
+   instructions reach both halves of the register file with their
+   extension bits (`vsr_num()` maps Float → n, Vector → 32+n), which is
+   how the scalar/vector seams cross without memory: `mtvsrd` targets a
+   VR directly, `xxpermdi`/`xxspltw` read an FPR and write a VR.
+4. **The f32 seam.** Scalar `f32` is held widened to double (Phase 1
+   decision, unchanged); an `f32x4` lane is a raw single. Every
+   crossing converts explicitly: splat = `xscvdpspn` (already the
+   `CvtToSingleBits` op) then `xxspltw` of BE word 0; extract will be
+   `xxspltw` + `xscvspdpn`. No rule may move f32 bits across the seam
+   any other way.
+5. **ELFv2 vector ABI, verified against GCC on hardware:** vector args
+   in v2-v13 *by vector-parameter order* (like FPRs, independent of GPR
+   exhaustion); each occupies a quadword-aligned pair of doubleword
+   slots in the parameter save area and *skips the corresponding GPRs*
+   — the opposite of `__int128`, which packs densely and never skips.
+   Returns in v2 (v2-v3 internally).
+6. **P8/P9 gating lives at emit time** inside the memory pseudos
+   (identical operand shapes, `has_isa_3_0` selects the sequence), not
+   in the ISLE rules. Everything else emitted so far is POWER8-clean;
+   the lane extract/insert fast paths (`xxextractuw`, `mfvsrld`, ...)
+   are ISA 3.0 and get the same treatment when they arrive.
+7. **`vconst`** goes through the GPRs (two `LoadConst64` + two `mtvsrd`
+   + `xxpermdi`), with `xxlxor` for zero. A constant-island path is a
+   later optimization; measure before assuming it wins (see Phase 6:
+   off-critical-path instruction count has measured zero effect).
+
+Ops landed with the foundations: v128 load/store, `vconst`, all-lane
+`splat` (int and float), `iadd`/`isub` at every lane width,
+`band`/`bor`/`bxor`/`bnot`, vector-vector `bitcast`, plus regalloc
+spill/reload, cross-call preservation and both ABI paths. Everything
+else in the ~236-op grid remains: comparisons, shifts, float lane
+arithmetic, min/max, lane ops, conversions, narrowing/widening,
+`shuffle`/`swizzle` — the bulk-fill phase, on the cheaper model, one
+family at a time with runtests per family.
+
 ~236 SIMD ops; POWER8 VSX covers most of wasm SIMD but the patch's SIMD
 regression tests (extract-lane canonicalisation, extmul aliased dest,
 high-lane corruption on P8 vs P9) are exactly the corner cases to encode as
