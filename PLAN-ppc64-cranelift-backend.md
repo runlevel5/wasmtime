@@ -660,10 +660,38 @@ post-mortems:
   backends. `i64.add128/sub128/mul_wide_{s,u}` lower to exactly the
   expected instruction pairs (`addc/adde`, `subc/sube`,
   `mulld/mulhd(u)`).
-- Still out of scope: i128 div/rem (only s390x lowers these), `cls`,
-  `bswap`/`bitrev`/`iabs` (all widths), `nearest` (PPC's `frin`
-  rounds ties away from zero, not to even — needs a fixup sequence),
-  128-bit atomics.
+- Follow-up (2026-08-19, same day): everything on the gap list except
+  i128 division has now been implemented too:
+  - `cls` (all widths): `clz(x ^ (x >> 63)) − 1` on the sign-extended
+    value; `iabs` via compare-and-isel with a carry-chained negate for
+    the i128 case; `bmask` to/from i128.
+  - `bswap`: store to the ELFv2 red zone + `lhbrx`/`lwbrx`/`ldbrx`
+    (the byte-reversed loads exist only in indexed form, so r0 carries
+    the slot address). The Linux kernel's `USER_REDZONE_SIZE` (512)
+    keeps the slot safe from signal delivery. `bitrev` = the bswap
+    sequence + three SWAR swap-merge rounds; narrow widths finish
+    with one right shift, which also flushes the upper garbage.
+  - `ceil`/`floor`/`trunc` via `frip`/`frim`/`friz`; `nearest` via
+    `xsrdpic`, which rounds by the *current* FPSCR mode — ties-to-even
+    under the default Cranelift always runs with (`frin` is
+    ties-away and unusable for this). `has_round()` now returns true,
+    so wasm rounding ops compile natively instead of calling host
+    builtins.
+  - 128-bit atomics via `lqarx`/`stqcx.` pseudo-loops. Plain `lq`/
+    `stq` raise alignment interrupts in LE mode before ISA 3.0, so
+    even the plain atomic load uses `lqarx`. The reservation pair
+    must be even:odd with the even register holding the
+    most-significant doubleword; every operand is pinned to a fixed
+    register (addr r3, source r4:r5, CAS replacement r6:r7, old value
+    out r8:r9, computed pair r10:r11 — r11 being the always-free
+    spill temp), mirroring how aarch64 pins its CAS loop. Min/max
+    inside the loop: compare highs, one conditional skip to re-compare
+    lows unsigned, then two `isel`s on the surviving cr0 bit.
+- Still out of scope: i128 div/rem — deliberate. The only backend with
+  a lowering is s390x, and only via z17 vector hardware; x64, aarch64
+  and riscv64 all exclude it in fuzzgen exactly as we do. A software
+  long-division loop would be upstream-divergent effort with no
+  consumer (wasm never emits it).
 
 ### Phase 5 — SIMD via VSX (optional, +2–3 months)
 
