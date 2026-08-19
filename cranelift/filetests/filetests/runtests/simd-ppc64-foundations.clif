@@ -1,0 +1,140 @@
+test interpret
+test run
+target powerpc64le
+target powerpc64le has_isa_3_0
+
+function %vconst_i32x4() -> i32x4 {
+block0:
+    v0 = vconst.i32x4 [1 2 3 4]
+    return v0
+}
+; run: %vconst_i32x4() == [1 2 3 4]
+
+function %vconst_zero() -> i64x2 {
+block0:
+    v0 = vconst.i64x2 [0 0]
+    return v0
+}
+; run: %vconst_zero() == [0 0]
+
+function %splat_i8(i8) -> i8x16 {
+block0(v0: i8):
+    v1 = splat.i8x16 v0
+    return v1
+}
+; run: %splat_i8(7) == [7 7 7 7 7 7 7 7 7 7 7 7 7 7 7 7]
+; run: %splat_i8(-1) == [255 255 255 255 255 255 255 255 255 255 255 255 255 255 255 255]
+
+function %splat_i16(i16) -> i16x8 {
+block0(v0: i16):
+    v1 = splat.i16x8 v0
+    return v1
+}
+; run: %splat_i16(-2) == [-2 -2 -2 -2 -2 -2 -2 -2]
+
+function %splat_i32(i32) -> i32x4 {
+block0(v0: i32):
+    v1 = splat.i32x4 v0
+    return v1
+}
+; run: %splat_i32(0x12345678) == [0x12345678 0x12345678 0x12345678 0x12345678]
+
+function %splat_i64(i64) -> i64x2 {
+block0(v0: i64):
+    v1 = splat.i64x2 v0
+    return v1
+}
+; run: %splat_i64(0x0123456789abcdef) == [0x0123456789abcdef 0x0123456789abcdef]
+
+function %splat_f32(f32) -> f32x4 {
+block0(v0: f32):
+    v1 = splat.f32x4 v0
+    return v1
+}
+; run: %splat_f32(0x1.5p3) == [0x1.5p3 0x1.5p3 0x1.5p3 0x1.5p3]
+
+function %splat_f64(f64) -> f64x2 {
+block0(v0: f64):
+    v1 = splat.f64x2 v0
+    return v1
+}
+; run: %splat_f64(-0x1.921fb54442d18p1) == [-0x1.921fb54442d18p1 -0x1.921fb54442d18p1]
+
+function %iadd_i8x16(i8x16, i8x16) -> i8x16 {
+block0(v0: i8x16, v1: i8x16):
+    v2 = iadd v0, v1
+    return v2
+}
+; run: %iadd_i8x16([1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16], [1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1]) == [2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17]
+; run: %iadd_i8x16([255 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0], [1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0]) == [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0]
+
+function %iadd_i32x4(i32x4, i32x4) -> i32x4 {
+block0(v0: i32x4, v1: i32x4):
+    v2 = iadd v0, v1
+    return v2
+}
+; run: %iadd_i32x4([1 2 3 4], [10 20 30 40]) == [11 22 33 44]
+; run: %iadd_i32x4([0xffffffff 0 0 0], [1 0 0 0]) == [0 0 0 0]
+
+function %iadd_i64x2(i64x2, i64x2) -> i64x2 {
+block0(v0: i64x2, v1: i64x2):
+    v2 = iadd v0, v1
+    return v2
+}
+; run: %iadd_i64x2([1 2], [100 200]) == [101 202]
+
+function %isub_i16x8(i16x8, i16x8) -> i16x8 {
+block0(v0: i16x8, v1: i16x8):
+    v2 = isub v0, v1
+    return v2
+}
+; run: %isub_i16x8([10 20 30 40 50 60 70 80], [1 2 3 4 5 6 7 8]) == [9 18 27 36 45 54 63 72]
+
+function %logic_v128(i32x4, i32x4) -> i32x4 {
+block0(v0: i32x4, v1: i32x4):
+    v2 = band v0, v1
+    v3 = bor v2, v1
+    v4 = bxor v3, v0
+    return v4
+}
+; run: %logic_v128([0xff00ff00 0 0xffffffff 0], [0x0ff00ff0 0x12345678 0 1]) == [0xf0f0f0f0 0x12345678 0xffffffff 1]
+
+function %bnot_v128(i64x2) -> i64x2 {
+block0(v0: i64x2):
+    v1 = bnot v0
+    return v1
+}
+; run: %bnot_v128([0 0xffffffffffffffff]) == [0xffffffffffffffff 0]
+
+function %load_store_rt(i32x4) -> i32x4 {
+    ss0 = explicit_slot 16
+block0(v0: i32x4):
+    v1 = stack_addr.i64 ss0
+    store v0, v1
+    v2 = load.i32x4 v1
+    return v2
+}
+; run: %load_store_rt([0x11111111 0x22222222 0x33333333 0x44444444]) == [0x11111111 0x22222222 0x33333333 0x44444444]
+
+function %bitcast_rt(i32x4) -> i64x2 {
+block0(v0: i32x4):
+    v1 = bitcast.i64x2 little v0
+    return v1
+}
+; run: %bitcast_rt([0x89abcdef 0x01234567 1 0]) == [0x0123456789abcdef 0x1]
+
+function %vec_across_call(i32x4) -> i32x4 {
+    fn0 = %vconst_i32x4() -> i32x4
+block0(v0: i32x4):
+    v1 = call fn0()
+    v2 = iadd v0, v1
+    return v2
+}
+; run: %vec_across_call([10 20 30 40]) == [11 22 33 44]
+
+function %vec_args9(i64, i32x4, i64, i32x4) -> i32x4 {
+block0(v0: i64, v1: i32x4, v2: i64, v3: i32x4):
+    v4 = iadd v1, v3
+    return v4
+}
+; run: %vec_args9(0, [1 2 3 4], 0, [5 6 7 8]) == [6 8 10 12]

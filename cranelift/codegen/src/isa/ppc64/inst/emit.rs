@@ -136,6 +136,24 @@ fn emit_mem_access(
     }
 }
 
+/// Resolve an `AMode` for the X-form-only vector accesses: returns the
+/// `(RA, RB)` fields, materializing the offset into r0 when non-zero.
+/// With a zero offset the base goes in RB and RA is the literal zero,
+/// so no scratch instruction is needed.
+fn vec_mem_ea(sink: &mut MachBuffer<Inst>, state: &EmitState, mem: AMode) -> (u32, u32) {
+    let (base, offset) = mem.to_base_and_offset(state.frame_layout());
+    let base_n = reg_num(base);
+    debug_assert!(base_n != 0, "r0 is not a valid base register");
+    if offset == 0 {
+        (0, base_n)
+    } else {
+        for w in Inst::load_constant_words(0, offset as u64) {
+            sink.put4(w);
+        }
+        (base_n, 0)
+    }
+}
+
 impl Inst {
     /// Expand a division or remainder, including the checks CLIF requires
     /// but PPC's divide instructions do not perform.
@@ -1027,7 +1045,10 @@ impl MachInstEmit for Inst {
                         sink.put4(enc_fmr(reg_num(rd.to_reg()), reg_num(rm)));
                     }
                     RegClass::Vector => {
-                        unimplemented!("ppc64 vector moves are not yet supported")
+                        // xxlor rd, rm, rm
+                        let d = vsr_num(rd.to_reg());
+                        let m = vsr_num(rm);
+                        sink.put4(enc_xx3(d, m, m, 146));
                     }
                 }
             }
@@ -1506,6 +1527,107 @@ impl MachInstEmit for Inst {
                 sink.put4(enc_bc(bo_for(false), CR0_EQ, 0, false)); // bne- loop
                 sink.bind_label(done, &mut state.ctrl_plane);
                 sink.put4(ISYNC);
+            }
+
+            &Inst::VecLoad { rd, from, flags } => {
+                if let Some(trap_code) = flags.trap_code() {
+                    sink.add_trap(trap_code);
+                }
+                let t = vsr_num(rd.to_reg());
+                let (ra, rb) = vec_mem_ea(sink, state, from);
+                if emit_info.isa_flags.has_isa_3_0() {
+                    sink.put4(enc_vsx_x(t, ra, rb, 268)); // lxvx
+                } else {
+                    sink.put4(enc_vsx_x(t, ra, rb, 844)); // lxvd2x
+                    sink.put4(enc_xxpermdi(t, t, t, 2)); // xxswapd
+                }
+            }
+
+            &Inst::VecStore { to, rs, flags } => {
+                if let Some(trap_code) = flags.trap_code() {
+                    sink.add_trap(trap_code);
+                }
+                let src = vsr_num(rs);
+                let (ra, rb) = vec_mem_ea(sink, state, to);
+                if emit_info.isa_flags.has_isa_3_0() {
+                    sink.put4(enc_vsx_x(src, ra, rb, 396)); // stxvx
+                } else {
+                    // Swap through the reserved scratch v0: spill
+                    // stores are emitted where no temporary can be
+                    // allocated.
+                    sink.put4(enc_xxpermdi(VEC_SCRATCH, src, src, 2));
+                    sink.put4(enc_vsx_x(VEC_SCRATCH, ra, rb, 972)); // stxvd2x
+                }
+            }
+
+            &Inst::VecAluRRR { op, rd, ra, rb, ty } => {
+                let d = vsr_num(rd.to_reg());
+                let a = vsr_num(ra);
+                let b = vsr_num(rb);
+                let word = match op {
+                    VecAluOp::And => enc_xx3(d, a, b, 130),
+                    VecAluOp::Or => enc_xx3(d, a, b, 146),
+                    VecAluOp::Xor => enc_xx3(d, a, b, 154),
+                    VecAluOp::Nor => enc_xx3(d, a, b, 162),
+                    VecAluOp::Add | VecAluOp::Sub => {
+                        // VMX forms, VR numbers only.
+                        let (d, a, b) = (d - 32, a - 32, b - 32);
+                        let base = if op == VecAluOp::Add { 0 } else { 1024 };
+                        let xo = base
+                            + match ty.lane_bits() {
+                                8 => 0,
+                                16 => 64,
+                                32 => 128,
+                                64 => 192,
+                                _ => unreachable!("vector lane width {ty}"),
+                            };
+                        enc_vx(d, a, b, xo)
+                    }
+                };
+                sink.put4(word);
+            }
+
+            &Inst::VecZero { rd } => {
+                let d = vsr_num(rd.to_reg());
+                sink.put4(enc_xx3(d, d, d, 154)); // xxlxor d, d, d
+            }
+
+            &Inst::MovToVec { rd, rn } => {
+                sink.put4(enc_mxvsrd(vsr_num(rd.to_reg()), reg_num(rn), 179));
+            }
+
+            &Inst::VecSplatLane { rd, rn, ty } => {
+                // The scalar sits at the low end of BE doubleword 0.
+                let d = vsr_num(rd.to_reg());
+                let n = vsr_num(rn);
+                let word = match ty.lane_bits() {
+                    8 => enc_vx(d - 32, 7, n - 32, 524),  // vspltb 7
+                    16 => enc_vx(d - 32, 3, n - 32, 588), // vsplth 3
+                    32 => enc_vx(d - 32, 1, n - 32, 652), // vspltw 1
+                    64 => enc_xxpermdi(d, n, n, 0),
+                    _ => unreachable!("vector lane width {ty}"),
+                };
+                sink.put4(word);
+            }
+
+            &Inst::VecSplatFpr { rd, rn, is_f32 } => {
+                let d = vsr_num(rd.to_reg());
+                let n = vsr_num(rn);
+                let word = if is_f32 {
+                    enc_xxspltw(d, n, 0)
+                } else {
+                    enc_xxpermdi(d, n, n, 0)
+                };
+                sink.put4(word);
+            }
+
+            &Inst::VecPermDi { rd, ra, rb, dm } => {
+                sink.put4(enc_xxpermdi(
+                    vsr_num(rd.to_reg()),
+                    vsr_num(ra),
+                    vsr_num(rb),
+                    u32::from(dm),
+                ));
             }
 
             &Inst::Fence => sink.put4(SYNC),

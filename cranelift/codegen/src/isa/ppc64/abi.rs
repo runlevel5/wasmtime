@@ -116,12 +116,13 @@ impl ABIMachineSpec for Ppc64MachineDeps {
         // densely instead, which is more efficient and private to code
         // this backend compiles.
         let positional = args_or_rets == ArgsOrRets::Args && call_conv != isa::CallConv::Tail;
-        let (x_start, x_end, f_start, f_end) = match args_or_rets {
-            ArgsOrRets::Args => (3, 10, 1, 13),
-            ArgsOrRets::Rets => (3, 4, 1, 2),
+        let (x_start, x_end, f_start, f_end, v_start, v_end) = match args_or_rets {
+            ArgsOrRets::Args => (3, 10, 1, 13, 2, 13),
+            ArgsOrRets::Rets => (3, 4, 1, 2, 2, 3),
         };
         let mut next_x_reg = x_start;
         let mut next_f_reg = f_start;
+        let mut next_v_reg = v_start;
         let mut next_stack: u32 = 0;
         // Parameter doubleword index, for the positional scheme.
         let mut slot_idx: u32 = 0;
@@ -160,6 +161,18 @@ impl ABIMachineSpec for Ppc64MachineDeps {
             // are halves of one `__int128`).
             debug_assert!(rcs.len() <= 2);
 
+            // A vector parameter occupies a quadword-aligned pair of
+            // doubleword slots and skips the corresponding GPRs -- the
+            // opposite of `__int128`, which packs densely. (Verified
+            // against GCC and Clang: in `(long, vector, long, ...)` the
+            // vector's slots are 2-3, so the second long lands in r7.)
+            // Vector *registers* are assigned by vector-parameter order,
+            // v2 up, independent of GPR exhaustion, like the FPRs.
+            let is_vector = rcs == [RegClass::Vector];
+            if positional && is_vector {
+                slot_idx = align_to(slot_idx, 2);
+            }
+
             let mut slots = ABIArgSlotVec::new();
             for (rc, reg_ty) in rcs.iter().zip(reg_tys.iter()) {
                 let next_reg = if positional {
@@ -176,6 +189,11 @@ impl ABIMachineSpec for Ppc64MachineDeps {
                             next_f_reg += 1;
                             x
                         }
+                        RegClass::Vector if next_v_reg <= v_end => {
+                            let x = Some(vr(next_v_reg));
+                            next_v_reg += 1;
+                            x
+                        }
                         _ => None,
                     }
                 } else if (next_x_reg <= x_end) && *rc == RegClass::Int {
@@ -185,6 +203,10 @@ impl ABIMachineSpec for Ppc64MachineDeps {
                 } else if (next_f_reg <= f_end) && *rc == RegClass::Float {
                     let x = Some(fpr(next_f_reg));
                     next_f_reg += 1;
+                    x
+                } else if (next_v_reg <= v_end) && *rc == RegClass::Vector {
+                    let x = Some(vr(next_v_reg));
+                    next_v_reg += 1;
                     x
                 } else {
                     None
@@ -228,7 +250,7 @@ impl ABIMachineSpec for Ppc64MachineDeps {
                     });
                 }
                 if positional {
-                    slot_idx += 1;
+                    slot_idx += if is_vector { 2 } else { 1 };
                 }
             }
             args.push(ABIArg::Slots {
@@ -591,9 +613,7 @@ impl ABIMachineSpec for Ppc64MachineDeps {
                 let ty = match r_reg.class() {
                     RegClass::Int => I64,
                     RegClass::Float => F64,
-                    RegClass::Vector => {
-                        unimplemented!("ppc64 vector clobber saves are not yet supported")
-                    }
+                    RegClass::Vector => I8X16,
                 };
                 cur_offset = align_to(cur_offset, ty.bytes());
                 insts.push(Inst::gen_store(
@@ -636,9 +656,7 @@ impl ABIMachineSpec for Ppc64MachineDeps {
             let ty = match rreg.class() {
                 RegClass::Int => I64,
                 RegClass::Float => F64,
-                RegClass::Vector => {
-                    unimplemented!("ppc64 vector clobber restores are not yet supported")
-                }
+                RegClass::Vector => I8X16,
             };
             cur_offset = align_to(cur_offset, ty.bytes());
             insts.push(Inst::gen_load(
@@ -797,11 +815,10 @@ impl ABIMachineSpec for Ppc64MachineDeps {
     }
 }
 
-/// Callee-saved registers per ELFv2: r14-r31 and f14-f31. (v20-v31 are
-/// also callee-saved architecturally, but the backend never allocates
-/// vector registers yet.) r2 (TOC) and r13 (thread pointer) are
-/// dedicated registers that this backend never writes, so they are
-/// preserved for free and deliberately not listed.
+/// Callee-saved registers per ELFv2: r14-r31, f14-f31 and v20-v31.
+/// r2 (TOC) and r13 (thread pointer) are dedicated registers that this
+/// backend never writes, so they are preserved for free and
+/// deliberately not listed.
 const DEFAULT_CALLEE_SAVES: PRegSet = PRegSet::empty()
     .with(pgpr(14))
     .with(pgpr(15))
@@ -838,7 +855,19 @@ const DEFAULT_CALLEE_SAVES: PRegSet = PRegSet::empty()
     .with(pfpr(28))
     .with(pfpr(29))
     .with(pfpr(30))
-    .with(pfpr(31));
+    .with(pfpr(31))
+    .with(pvr(20))
+    .with(pvr(21))
+    .with(pvr(22))
+    .with(pvr(23))
+    .with(pvr(24))
+    .with(pvr(25))
+    .with(pvr(26))
+    .with(pvr(27))
+    .with(pvr(28))
+    .with(pvr(29))
+    .with(pvr(30))
+    .with(pvr(31));
 
 fn compute_clobber_size(clobbers: &[Writable<RealReg>]) -> u32 {
     let mut clobbered_size = 0;
@@ -1037,7 +1066,6 @@ const fn create_reg_environment() -> MachineEnv {
             .with(pfpr(12))
             .with(pfpr(13)),
         PRegSet::empty()
-            .with(pvr(0))
             .with(pvr(1))
             .with(pvr(2))
             .with(pvr(3))
@@ -1108,8 +1136,7 @@ const fn create_reg_environment() -> MachineEnv {
             .with(pvr(27))
             .with(pvr(28))
             .with(pvr(29))
-            .with(pvr(30))
-            .with(pvr(31)),
+            .with(pvr(30)),
     ];
 
     MachineEnv {

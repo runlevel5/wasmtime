@@ -10,6 +10,18 @@ pub(crate) fn reg_num(r: Reg) -> u32 {
     u32::from(r.to_real_reg().unwrap().hw_enc() & 31)
 }
 
+/// The 6-bit VSR number of a float or vector register: FPRs alias
+/// VSR0-31 and the vector registers VSR32-63.
+pub(crate) fn vsr_num(r: Reg) -> u32 {
+    let real = r.to_real_reg().unwrap();
+    let n = u32::from(real.hw_enc() & 31);
+    match real.class() {
+        regalloc2::RegClass::Float => n,
+        regalloc2::RegClass::Vector => 32 + n,
+        regalloc2::RegClass::Int => panic!("GPR used in a VSR position"),
+    }
+}
+
 /// D-form, arithmetic layout: `opcd | RT | RA | D16`.
 /// Used by addi (14), addis (15) and the load/store opcodes.
 /// N.B.: RA=0 means "literal zero" for addi/addis and load/store bases.
@@ -116,6 +128,68 @@ pub(crate) fn enc_xs(rs: u32, ra: u32, sh: u32) -> u32 {
     (31 << 26) | (rs << 21) | (ra << 16) | ((sh & 0x1F) << 11) | (413 << 2) | ((sh >> 5) << 1)
 }
 
+/// VX-form (VMX): `4 | VT | VA | VB | XO11`. Register fields are VR
+/// numbers 0-31 directly.
+pub(crate) fn enc_vx(vt: u32, va: u32, vb: u32, xo: u32) -> u32 {
+    debug_assert!(vt < 32 && va < 32 && vb < 32 && xo < 2048);
+    (4 << 26) | (vt << 21) | (va << 16) | (vb << 11) | xo
+}
+
+/// VSX X-form load/store: `31 | T5 | RA | RB | XO10 | TX`. The 6-bit
+/// VSR number is split into a 5-bit field and the TX/SX low bit.
+pub(crate) fn enc_vsx_x(t6: u32, ra: u32, rb: u32, xo: u32) -> u32 {
+    debug_assert!(t6 < 64 && ra < 32 && rb < 32);
+    (31 << 26) | ((t6 & 31) << 21) | (ra << 16) | (rb << 11) | (xo << 1) | (t6 >> 5)
+}
+
+/// XX3-form logical: `60 | T5 | A5 | B5 | XO8 | AX | BX | TX`.
+/// land = 130, lor = 146, lxor = 154, lnor = 162.
+pub(crate) fn enc_xx3(t6: u32, a6: u32, b6: u32, xo: u32) -> u32 {
+    debug_assert!(t6 < 64 && a6 < 64 && b6 < 64 && xo < 256);
+    (60 << 26)
+        | ((t6 & 31) << 21)
+        | ((a6 & 31) << 16)
+        | ((b6 & 31) << 11)
+        | (xo << 3)
+        | ((a6 >> 5) << 2)
+        | ((b6 >> 5) << 1)
+        | (t6 >> 5)
+}
+
+/// `xxpermdi`: XX3-form with the 2-bit doubleword-select immediate in
+/// place of the top of the opcode field: `60 | T5 | A5 | B5 | 0 DM | 01010 | AX BX TX`.
+pub(crate) fn enc_xxpermdi(t6: u32, a6: u32, b6: u32, dm: u32) -> u32 {
+    debug_assert!(t6 < 64 && a6 < 64 && b6 < 64 && dm < 4);
+    (60 << 26)
+        | ((t6 & 31) << 21)
+        | ((a6 & 31) << 16)
+        | ((b6 & 31) << 11)
+        | (dm << 8)
+        | (10 << 3)
+        | ((a6 >> 5) << 2)
+        | ((b6 >> 5) << 1)
+        | (t6 >> 5)
+}
+
+/// `xxspltw`: XX2-form: `60 | T5 | 00 UIM | B5 | XO9=164 | BX | TX`.
+pub(crate) fn enc_xxspltw(t6: u32, b6: u32, uim: u32) -> u32 {
+    debug_assert!(t6 < 64 && b6 < 64 && uim < 4);
+    (60 << 26)
+        | ((t6 & 31) << 21)
+        | (uim << 16)
+        | ((b6 & 31) << 11)
+        | (164 << 2)
+        | ((b6 >> 5) << 1)
+        | (t6 >> 5)
+}
+
+/// `mtvsrd` (XO 179, GPR to VSR) / `mfvsrd` (XO 51, VSR to GPR), with
+/// the full 6-bit VSR number (unlike `enc_xx1`, which is FPR-only).
+pub(crate) fn enc_mxvsrd(vsr6: u32, gpr: u32, xo: u32) -> u32 {
+    debug_assert!(vsr6 < 64 && gpr < 32);
+    (31 << 26) | ((vsr6 & 31) << 21) | (gpr << 16) | (xo << 1) | (vsr6 >> 5)
+}
+
 /// Compare, X-form: `31 | BF | 0 | L | RA | RB | XO10 | 0`.
 /// `xo` is 0 for cmp (signed), 32 for cmpl (logical); `l` selects 64-bit.
 pub(crate) fn enc_cmp(bf: u32, l: u32, ra: u32, rb: u32, xo: u32) -> u32 {
@@ -220,6 +294,28 @@ mod tests {
         assert_eq!(enc_d(14, 3, 0, 1), 0x3860_0001); // li r3, 1
         assert_eq!(enc_d(15, 4, 0, 0x1234), 0x3C80_1234); // lis r4, 0x1234
         assert_eq!(enc_d_logic(24, 0, 0, 0), NOP_INSTRUCTION); // nop
+        // Vector forms, all verified against llvm-mc (-mcpu=pwr8).
+        assert_eq!(enc_vsx_x(34, 0, 5, 268), 0x7C40_2A19); // lxvx vs34, 0, r5
+        assert_eq!(enc_vsx_x(34, 0, 5, 396), 0x7C40_2B19); // stxvx vs34, 0, r5
+        assert_eq!(enc_vsx_x(34, 0, 5, 844), 0x7C40_2E99); // lxvd2x vs34, 0, r5
+        assert_eq!(enc_vsx_x(34, 0, 5, 972), 0x7C40_2F99); // stxvd2x vs34, 0, r5
+        assert_eq!(enc_xxpermdi(34, 35, 35, 2), 0xF043_1A57); // xxswapd vs34, vs35
+        assert_eq!(enc_xxpermdi(34, 35, 36, 2), 0xF043_2257); // xxpermdi vs34, vs35, vs36, 2
+        assert_eq!(enc_xx3(34, 35, 36, 146), 0xF043_2497); // xxlor vs34, vs35, vs36
+        assert_eq!(enc_xx3(34, 34, 34, 154), 0xF042_14D7); // xxlxor vs34, vs34, vs34
+        assert_eq!(enc_xx3(34, 35, 36, 130), 0xF043_2417); // xxland vs34, vs35, vs36
+        assert_eq!(enc_xx3(34, 35, 36, 162), 0xF043_2517); // xxlnor vs34, vs35, vs36
+        assert_eq!(enc_vx(2, 3, 4, 0), 0x1043_2000); // vaddubm v2, v3, v4
+        assert_eq!(enc_vx(2, 3, 4, 64), 0x1043_2040); // vadduhm v2, v3, v4
+        assert_eq!(enc_vx(2, 3, 4, 128), 0x1043_2080); // vadduwm v2, v3, v4
+        assert_eq!(enc_vx(2, 3, 4, 192), 0x1043_20C0); // vaddudm v2, v3, v4
+        assert_eq!(enc_vx(2, 3, 4, 1024), 0x1043_2400); // vsububm v2, v3, v4
+        assert_eq!(enc_vx(2, 7, 3, 524), 0x1047_1A0C); // vspltb v2, v3, 7
+        assert_eq!(enc_vx(2, 3, 3, 588), 0x1043_1A4C); // vsplth v2, v3, 3
+        assert_eq!(enc_vx(2, 1, 3, 652), 0x1041_1A8C); // vspltw v2, v3, 1
+        assert_eq!(enc_mxvsrd(34, 5, 179), 0x7C45_0167); // mtvsrd vs34, r5
+        assert_eq!(enc_mxvsrd(34, 5, 51), 0x7C45_0067); // mfvsrd r5, vs34
+        assert_eq!(enc_xxspltw(34, 35, 1), 0xF041_1A93); // xxspltw vs34, vs35, 1
         // Shift-by-immediate forms, all verified against llvm-mc.
         assert_eq!(enc_md(4, 3, 7, 56, 1), 0x7883_3E24); // sldi r3, r4, 7
         assert_eq!(enc_md(4, 3, 57, 7, 0), 0x7883_C9C2); // srdi r3, r4, 7

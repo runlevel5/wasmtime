@@ -132,6 +132,18 @@
     (CvtFromSingleBits)
 ))
 
+;; Vector integer lane arithmetic and bitwise logic. The type on the
+;; MInst selects the lane width for Add/Sub; the logicals ignore it.
+(type VecAluOp
+  (enum
+    (Add)
+    (Sub)
+    (And)
+    (Or)
+    (Xor)
+    (Nor)
+))
+
 ;; Floating-point round-to-integral. Ceil/floor/trunc map to
 ;; `frip`/`frim`/`friz`; `nearest` needs ties-to-even, which none of the
 ;; `fri*` family provides (`frin` rounds ties away from zero), so it
@@ -276,6 +288,67 @@
       (rd WritableReg)
       (rn Reg)
       (ty Type))
+
+    ;; Vector loads and stores. Lane order in the register is
+    ;; little-endian: wasm lane 0 in the least-significant bits, memory
+    ;; byte 0 at the LSB end, so `bitcast` between `i64x2` lane 0 and a
+    ;; scalar is the identity and lane `i` of an `iNxM` sits at byte
+    ;; offset `i*N/8` in memory. On ISA 3.0 this is exactly `lxvx` /
+    ;; `stxvx`; before it (the POWER8 baseline), `lxvd2x`/`stxvd2x`
+    ;; load big-endian doubleword pairs and each access adds an
+    ;; `xxswapd` -- through the reserved scratch v0 for stores, since
+    ;; spill stores cannot allocate a temporary. All forms are
+    ;; alignment-free.
+    (VecLoad
+      (rd WritableReg)
+      (from AMode)
+      (flags MemFlagsData))
+
+    (VecStore
+      (to AMode)
+      (rs Reg)
+      (flags MemFlagsData))
+
+    ;; Vector register-register ALU operation.
+    (VecAluRRR
+      (op VecAluOp)
+      (rd WritableReg)
+      (ra Reg)
+      (rb Reg)
+      (ty Type))
+
+    ;; Materialize the all-zeros vector (`xxlxor rd, rd, rd`).
+    (VecZero
+      (rd WritableReg))
+
+    ;; Move a GPR into doubleword element 0 (the most-significant
+    ;; doubleword) of a vector register (`mtvsrd`).
+    (MovToVec
+      (rd WritableReg)
+      (rn Reg))
+
+    ;; Splat the scalar that `MovToVec` deposited: the value sits at
+    ;; the low end of big-endian doubleword 0, so the source lane is
+    ;; BE byte 7 / halfword 3 / word 1, or the doubleword itself.
+    (VecSplatLane
+      (rd WritableReg)
+      (rn Reg)
+      (ty Type))
+
+    ;; Splat from an FPR: `xxspltw` of big-endian word 0 for an `f32`
+    ;; whose single-precision bits `xscvdpspn` placed there, or
+    ;; `xxpermdi` doubling doubleword 0 for an `f64`.
+    (VecSplatFpr
+      (rd WritableReg)
+      (rn Reg)
+      (is_f32 bool))
+
+    ;; `xxpermdi rd, ra, rb, dm`, all operands vector registers.
+    (VecPermDi
+      (rd WritableReg)
+      (ra Reg)
+      (rb Reg)
+      (dm u8))
 
     ;; Fused multiply-add: `rd = ra * rc + rb`.
     (FpuFma
@@ -786,6 +859,58 @@
   (let ((dst WritableReg (temp_writable_reg $I64))
         (_ Unit (emit (MInst.Bswap dst rn ty))))
     dst))
+
+(decl vec_alu_rrr (VecAluOp Reg Reg Type) Reg)
+(rule (vec_alu_rrr op a b ty)
+  (let ((dst WritableReg (temp_writable_reg $I8X16))
+        (_ Unit (emit (MInst.VecAluRRR op dst a b ty))))
+    dst))
+
+(decl gen_vec_load (AMode MemFlagsData) Reg)
+(rule (gen_vec_load mem flags)
+  (let ((dst WritableReg (temp_writable_reg $I8X16))
+        (_ Unit (emit (MInst.VecLoad dst mem flags))))
+    dst))
+
+(decl gen_vec_store (AMode MemFlagsData Reg) SideEffectNoResult)
+(rule (gen_vec_store mem flags src)
+  (SideEffectNoResult.Inst (MInst.VecStore mem src flags)))
+
+(decl vec_zero () Reg)
+(rule (vec_zero)
+  (let ((dst WritableReg (temp_writable_reg $I8X16))
+        (_ Unit (emit (MInst.VecZero dst))))
+    dst))
+
+(decl mov_to_vec (Reg) Reg)
+(rule (mov_to_vec rn)
+  (let ((dst WritableReg (temp_writable_reg $I8X16))
+        (_ Unit (emit (MInst.MovToVec dst rn))))
+    dst))
+
+(decl vec_splat_lane (Reg Type) Reg)
+(rule (vec_splat_lane rn ty)
+  (let ((dst WritableReg (temp_writable_reg $I8X16))
+        (_ Unit (emit (MInst.VecSplatLane dst rn ty))))
+    dst))
+
+(decl vec_splat_fpr (Reg bool) Reg)
+(rule (vec_splat_fpr rn is_f32)
+  (let ((dst WritableReg (temp_writable_reg $I8X16))
+        (_ Unit (emit (MInst.VecSplatFpr dst rn is_f32))))
+    dst))
+
+(decl vec_permdi (Reg Reg u8) Reg)
+(rule (vec_permdi a b dm)
+  (let ((dst WritableReg (temp_writable_reg $I8X16))
+        (_ Unit (emit (MInst.VecPermDi dst a b dm))))
+    dst))
+
+;; Split a 128-bit constant for materialization through the GPRs.
+(decl pure vconst_lo64 (u128) u64)
+(extern constructor vconst_lo64 vconst_lo64)
+(decl pure vconst_hi64 (u128) u64)
+(extern constructor vconst_hi64 vconst_hi64)
 
 (decl fpu_to_int (Reg bool bool Type Type) Reg)
 (rule (fpu_to_int rn signed sat in_ty out_ty)

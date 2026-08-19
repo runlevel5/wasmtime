@@ -30,7 +30,7 @@ use crate::isa::ppc64::abi::Ppc64MachineDeps;
 
 pub use crate::isa::ppc64::lower::isle::generated_code::{
     AluImmOp, AluOp, BitOp, DivOp, FpuOp1, FpuOp2, FpuRoundMode, LoadOP, MInst as Inst, ShiftOp,
-    StoreOP,
+    StoreOP, VecAluOp,
     UnaryOp,
 };
 
@@ -46,6 +46,13 @@ pub struct ReturnCallInfo<T> {
 impl Inst {
     /// Generic constructor for a load (zero-extending where appropriate).
     pub fn gen_load(into_reg: Writable<Reg>, mem: AMode, ty: Type, flags: MemFlagsData) -> Inst {
+        if ty.is_vector() {
+            return Inst::VecLoad {
+                rd: into_reg,
+                from: mem,
+                flags,
+            };
+        }
         Inst::Load {
             rd: into_reg,
             op: LoadOP::from_type(ty),
@@ -56,6 +63,13 @@ impl Inst {
 
     /// Generic constructor for a store.
     pub fn gen_store(mem: AMode, from_reg: Reg, ty: Type, flags: MemFlagsData) -> Inst {
+        if ty.is_vector() {
+            return Inst::VecStore {
+                to: mem,
+                rs: from_reg,
+                flags,
+            };
+        }
         Inst::Store {
             to: mem,
             op: StoreOP::from_type(ty),
@@ -171,6 +185,35 @@ fn ppc64_get_operands(inst: &mut Inst, collector: &mut impl OperandVisitor) {
         }
         Inst::Load { rd, from, .. } => {
             from.get_operands(collector);
+            collector.reg_def(rd);
+        }
+        Inst::VecLoad { rd, from, .. } => {
+            from.get_operands(collector);
+            collector.reg_def(rd);
+        }
+        Inst::VecStore { to, rs, .. } => {
+            to.get_operands(collector);
+            collector.reg_use(rs);
+        }
+        Inst::VecAluRRR { rd, ra, rb, .. } => {
+            collector.reg_use(ra);
+            collector.reg_use(rb);
+            collector.reg_def(rd);
+        }
+        Inst::VecZero { rd } => {
+            collector.reg_def(rd);
+        }
+        Inst::MovToVec { rd, rn } | Inst::VecSplatLane { rd, rn, .. } => {
+            collector.reg_use(rn);
+            collector.reg_def(rd);
+        }
+        Inst::VecSplatFpr { rd, rn, .. } => {
+            collector.reg_use(rn);
+            collector.reg_def(rd);
+        }
+        Inst::VecPermDi { rd, ra, rb, .. } => {
+            collector.reg_use(ra);
+            collector.reg_use(rb);
             collector.reg_def(rd);
         }
         Inst::Store { to, src, .. } => {
@@ -497,6 +540,9 @@ impl MachInst for Inst {
             // that run out of floating-point argument registers.
             F32 => Ok((&[RegClass::Float], &[F64])),
             F64 => Ok((&[RegClass::Float], core::slice::from_ref(ty))),
+            _ if ty.is_vector() && ty.bits() == 128 => {
+                Ok((&[RegClass::Vector], core::slice::from_ref(ty)))
+            }
             _ => Err(CodegenError::Unsupported(alloc::format!(
                 "type not yet supported by the ppc64 backend: {ty}"
             ))),
@@ -894,6 +940,44 @@ impl Inst {
                 reg(*new_hi),
                 reg(*addr)
             ),
+            Inst::VecLoad { rd, from, .. } => {
+                format!("vec_load {}, {from}", wreg(*rd))
+            }
+            Inst::VecStore { to, rs, .. } => {
+                format!("vec_store {}, {to}", reg(*rs))
+            }
+            Inst::VecAluRRR { op, rd, ra, rb, ty } => {
+                let mnemonic = match op {
+                    VecAluOp::Add => "vadd",
+                    VecAluOp::Sub => "vsub",
+                    VecAluOp::And => "xxland",
+                    VecAluOp::Or => "xxlor",
+                    VecAluOp::Xor => "xxlxor",
+                    VecAluOp::Nor => "xxlnor",
+                };
+                match op {
+                    VecAluOp::Add | VecAluOp::Sub => format!(
+                        "{mnemonic}{} {}, {}, {}",
+                        ty.lane_bits(),
+                        wreg(*rd),
+                        reg(*ra),
+                        reg(*rb)
+                    ),
+                    _ => format!("{mnemonic} {}, {}, {}", wreg(*rd), reg(*ra), reg(*rb)),
+                }
+            }
+            Inst::VecZero { rd } => format!("vec_zero {}", wreg(*rd)),
+            Inst::MovToVec { rd, rn } => format!("mtvsrd {}, {}", wreg(*rd), reg(*rn)),
+            Inst::VecSplatLane { rd, rn, ty } => {
+                format!("vec_splat{} {}, {}", ty.lane_bits(), wreg(*rd), reg(*rn))
+            }
+            Inst::VecSplatFpr { rd, rn, is_f32 } => {
+                let mnemonic = if *is_f32 { "xxspltw" } else { "xxpermdi0" };
+                format!("{mnemonic} {}, {}", wreg(*rd), reg(*rn))
+            }
+            Inst::VecPermDi { rd, ra, rb, dm } => {
+                format!("xxpermdi {}, {}, {}, {dm}", wreg(*rd), reg(*ra), reg(*rb))
+            }
             Inst::Fence => "sync".to_string(),
             Inst::Call { info } => format!("bl {:?}", info.dest),
             Inst::ReturnCall { info } => format!("return_call {:?}", info.dest),

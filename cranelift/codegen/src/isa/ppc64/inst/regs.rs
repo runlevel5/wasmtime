@@ -17,7 +17,11 @@
 //! | r31     | Frame pointer                       | no |
 //! | f0-f13  | FP scratch / args, volatile         | yes (preferred) |
 //! | f14-f31 | FP callee-saved                     | yes (non-preferred) |
-//! | v0-v19  | Vector, volatile                    | yes (preferred) |
+//! | v0      | Vector emission scratch (the POWER8 | no |
+//! |         | store path byte-swaps through it);  |    |
+//! |         | volatile, so native callers never   |    |
+//! |         | expect it preserved                 |    |
+//! | v1-v19  | Vector, volatile                    | yes (preferred) |
 //! | v20-v31 | Vector, callee-saved                | yes (non-preferred) |
 //!
 //! LR and CTR are SPRs, not modelled by the register allocator: LR is
@@ -55,6 +59,21 @@ pub const fn pfpr(enc: usize) -> PReg {
 pub const fn pvr(enc: usize) -> PReg {
     PReg::new(enc, RegClass::Vector)
 }
+
+#[inline]
+pub fn vr(enc: usize) -> Reg {
+    let p_reg = PReg::new(enc, RegClass::Vector);
+    let v_reg = VReg::new(p_reg.index(), p_reg.class());
+    Reg::from(v_reg)
+}
+
+/// v0: reserved vector emission scratch. The pre-ISA-3.0 vector store
+/// sequence must byte-swap into a register that regalloc cannot have
+/// given to anyone, because spill stores are generated where no
+/// temporary can be allocated. It must also be a *volatile* register:
+/// the scratch use is invisible to regalloc, so a callee-saved choice
+/// would be silently clobbered under native callers that rely on it.
+pub const VEC_SCRATCH: u32 = 32; // as a 6-bit VSR number: 32 + 0
 
 /// r0: usable as a plain register in most contexts, but reads as literal
 /// zero when used as the base of a load/store or as the RA operand of

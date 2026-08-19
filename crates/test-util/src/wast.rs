@@ -528,20 +528,19 @@ impl WastTest {
             return true;
         }
 
-        // These tests use v128 types unconditionally, and SIMD is
-        // force-disabled on ppc64le until the backend grows vector
-        // lowerings, so they cannot pass there in any configuration.
+        // Scalar-NaN canonicalization is implemented with vector ops
+        // the ppc64le backend does not lower yet. (The other tests that
+        // used to sit in this list -- memory_copy, memory_copy64 and
+        // gc/array-copy-non-gc-refs -- exercised Wasmtime's *internal*
+        // v128-typed fast paths, which work now that the backend has
+        // vector loads, stores and moves.)
         #[cfg(target_arch = "powerpc64")]
-        if config.compiler == Compiler::CraneliftNative {
-            let requires_simd = [
-                "spec_testsuite/memory_copy.wast",
-                "spec_testsuite/memory_copy64.wast",
-                "misc_testsuite/canonicalize-nan-scalar.wast",
-                "misc_testsuite/gc/array-copy-non-gc-refs.wast",
-            ];
-            if requires_simd.iter().any(|part| self.path.ends_with(part)) {
-                return true;
-            }
+        if config.compiler == Compiler::CraneliftNative
+            && self
+                .path
+                .ends_with("misc_testsuite/canonicalize-nan-scalar.wast")
+        {
+            return true;
         }
 
         // Some tests are known to fail with the pooling allocator

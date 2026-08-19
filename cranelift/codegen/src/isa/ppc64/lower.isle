@@ -1399,3 +1399,80 @@
     (output (gen_atomic_cas128 (put_in_reg p)
                                (lo er) (hi er)
                                (lo xr) (hi xr)))))
+
+;;;; Vector (128-bit SIMD) foundations ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; Lane order is little-endian throughout: wasm lane 0 lives in the
+;; least-significant bits of the register and at the lowest memory
+;; address. PPC's own element numbering is big-endian (element 0 = most
+;; significant), so lane-indexed instructions translate the index; the
+;; memory instructions are chosen so that no other rule ever sees the
+;; difference (see `VecLoad` in inst.isle).
+
+;;;; Loads and stores
+
+(rule 2 (lower (load (ty_vec128 _) (little_or_native_endian flags) addr offset))
+  (output_reg (gen_vec_load (amode addr offset) flags)))
+
+(rule 2 (lower (store (little_or_native_endian flags)
+                      val @ (value_type (ty_vec128 _)) addr offset))
+  (side_effect (gen_vec_store (amode addr offset) flags (put_in_reg val))))
+
+;;;; Constants
+
+(rule 1 (lower (vconst (ty_vec128 _) (u128_from_constant n)))
+  (if-let true (u128_is_zero n))
+  (output_reg (vec_zero)))
+
+;; The general case goes through the GPRs: two 64-bit halves, `mtvsrd`
+;; into big-endian doubleword 0 of two scratch vectors, then `xxpermdi`
+;; pairs them with the high half in BE doubleword 0 (the high lanes).
+(rule 0 (lower (vconst (ty_vec128 _) (u128_from_constant n)))
+  (let ((lo Reg (imm $I64 (vconst_lo64 n)))
+        (hi Reg (imm $I64 (vconst_hi64 n))))
+    (output_reg (vec_permdi (mov_to_vec hi) (mov_to_vec lo) 0))))
+
+;;;; Splats
+
+(rule (lower (splat $I8X16 x))
+  (output_reg (vec_splat_lane (mov_to_vec (put_in_reg x)) $I8X16)))
+(rule (lower (splat $I16X8 x))
+  (output_reg (vec_splat_lane (mov_to_vec (put_in_reg x)) $I16X8)))
+(rule (lower (splat $I32X4 x))
+  (output_reg (vec_splat_lane (mov_to_vec (put_in_reg x)) $I32X4)))
+(rule (lower (splat $I64X2 x))
+  (output_reg (vec_splat_lane (mov_to_vec (put_in_reg x)) $I64X2)))
+
+;; A scalar `f32` is held widened to double; `xscvdpspn` deposits its
+;; single-precision bits in big-endian word 0, which `xxspltw` then
+;; replicates. An `f64` doubles its doubleword with `xxpermdi`.
+(rule (lower (splat $F32X4 x))
+  (output_reg (vec_splat_fpr (fpu_rr (FpuOp1.CvtToSingleBits) (put_in_reg x) $F32)
+                             true)))
+(rule (lower (splat $F64X2 x))
+  (output_reg (vec_splat_fpr (put_in_reg x) false)))
+
+;;;; Integer lane arithmetic
+
+(rule 4 (lower (iadd (ty_vec128 ty) x y))
+  (output_reg (vec_alu_rrr (VecAluOp.Add) (put_in_reg x) (put_in_reg y) ty)))
+
+(rule 4 (lower (isub (ty_vec128 ty) x y))
+  (output_reg (vec_alu_rrr (VecAluOp.Sub) (put_in_reg x) (put_in_reg y) ty)))
+
+;;;; Bitwise logic
+
+(rule 2 (lower (band (ty_vec128 ty) x y))
+  (output_reg (vec_alu_rrr (VecAluOp.And) (put_in_reg x) (put_in_reg y) ty)))
+(rule 2 (lower (bor (ty_vec128 ty) x y))
+  (output_reg (vec_alu_rrr (VecAluOp.Or) (put_in_reg x) (put_in_reg y) ty)))
+(rule 2 (lower (bxor (ty_vec128 ty) x y))
+  (output_reg (vec_alu_rrr (VecAluOp.Xor) (put_in_reg x) (put_in_reg y) ty)))
+(rule 2 (lower (bnot (ty_vec128 ty) x))
+  (let ((xr Reg (put_in_reg x)))
+    (output_reg (vec_alu_rrr (VecAluOp.Nor) xr xr ty))))
+
+;;;; Bitcasts between 128-bit vector types are pure reinterpretation.
+
+(rule 2 (lower (bitcast (ty_vec128 _) _ x @ (value_type (ty_vec128 _))))
+  (output_reg (put_in_reg x)))

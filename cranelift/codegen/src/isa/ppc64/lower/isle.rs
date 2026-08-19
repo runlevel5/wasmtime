@@ -222,6 +222,14 @@ impl generated_code::Context for Ppc64IsleContext<'_, '_, MInst, Ppc64Backend> {
         i16::try_from(i64::from(imm)).ok().map(|i| i as u16)
     }
 
+    fn vconst_lo64(&mut self, n: u128) -> u64 {
+        n as u64
+    }
+
+    fn vconst_hi64(&mut self, n: u128) -> u64 {
+        (n >> 64) as u64
+    }
+
     fn shift_imm(&mut self, n: u64, ty: Type) -> u8 {
         (n & u64::from(ty.bits() - 1)) as u8
     }
