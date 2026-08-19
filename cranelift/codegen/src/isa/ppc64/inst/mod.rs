@@ -2,7 +2,7 @@
 
 use crate::binemit::{Addend, CodeOffset, Reloc};
 pub use crate::ir::condcodes::{FloatCC, IntCC};
-use crate::ir::types::{F32, F64, I8, I16, I32, I64};
+use crate::ir::types::{F32, F64, I8, I16, I32, I64, I128};
 pub use crate::ir::{MemFlagsData, Type};
 use crate::isa::FunctionAlignment;
 use crate::machinst::*;
@@ -401,6 +401,11 @@ impl MachInst for Inst {
     fn rc_for_type(ty: &Type) -> CodegenResult<(&[RegClass], &[Type])> {
         match *ty {
             I8 | I16 | I32 | I64 => Ok((&[RegClass::Int], core::slice::from_ref(ty))),
+            // An `i128` lives in a pair of GPRs, low doubleword first,
+            // matching both little-endian memory order and the ELFv2
+            // convention that the lower-numbered register of a pair
+            // holds the least-significant half.
+            I128 => Ok((&[RegClass::Int, RegClass::Int], &[I64, I64])),
             // An `f32` is held in a floating-point register in double
             // format, because that is what `lfs` produces and what the
             // arithmetic instructions operate on. Reporting the *stored*
@@ -465,6 +470,10 @@ impl Inst {
                 let mnemonic = match op {
                     AluOp::Add => "add",
                     AluOp::Sub => "sub",
+                    AluOp::Addc => "addc",
+                    AluOp::Adde => "adde",
+                    AluOp::Subfc => "subc",
+                    AluOp::Subfe => "sube",
                     AluOp::And => "and",
                     AluOp::Or => "or",
                     AluOp::Xor => "xor",

@@ -7,6 +7,7 @@ target riscv64
 target riscv64 has_c has_zcb
 set enable_multi_ret_implicit_sret
 target s390x
+target powerpc64le
 
 function %select_spectre_guard_i8_eq(i8, i8, i8) -> i8 {
 block0(v0: i8, v1: i8, v2: i8):

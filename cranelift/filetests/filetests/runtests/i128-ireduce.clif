@@ -6,6 +6,7 @@ target s390x
 target x86_64
 target riscv64
 target riscv64 has_c has_zcb
+target powerpc64le
 
 function %ireduce_128_64(i128) -> i64 {
 block0(v0: i128):

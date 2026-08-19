@@ -313,9 +313,8 @@ here is:
 ##### ppc64le
 
 Vector support is not implemented in the ppc64le backend yet, so the `simd`
-and `relaxed-simd` proposals, along with `wide-arithmetic` (which needs
-128-bit integers), are reported as unsupported rather than failing at
-compile time.
+and `relaxed-simd` proposals are reported as unsupported rather than
+failing at compile time.
 
 | Feature                                 | Cranelift | Winch  |
 |-----------------------------------------|-----------|--------|
@@ -335,7 +334,7 @@ compile time.
 | [`memory64`]                            | ✅        | ❌     |
 | [`function-references`]                 | ✅        | ❌     |
 | [`gc`]                                  | ✅        | ❌     |
-| [`wide-arithmetic`]                     | ❌        | ❌     |
+| [`wide-arithmetic`]                     | ✅        | ❌     |
 | [`custom-page-sizes`]                   | ✅        | ❌     |
 | [`exception-handling`]                  | ✅        | ❌     |
 | [`stack-switching`]                     | ❌        | ❌     |

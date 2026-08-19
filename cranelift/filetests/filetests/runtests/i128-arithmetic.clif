@@ -12,6 +12,7 @@ target pulley32
 target pulley32be
 target pulley64
 target pulley64be
+target powerpc64le
 
 function %add_i128(i128, i128) -> i128 {
 block0(v0: i128,v1: i128):

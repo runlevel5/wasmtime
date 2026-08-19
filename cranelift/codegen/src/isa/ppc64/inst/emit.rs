@@ -442,6 +442,11 @@ impl MachInstEmit for Inst {
                     AluOp::Add => enc_xo(rd, ra, rb, 266),
                     // subf RT,RA,RB computes RB - RA; swap to get ra - rb.
                     AluOp::Sub => enc_xo(rd, rb, ra, 40),
+                    AluOp::Addc => enc_xo(rd, ra, rb, 10),
+                    AluOp::Adde => enc_xo(rd, ra, rb, 138),
+                    // The subtract-from forms swap like `subf`.
+                    AluOp::Subfc => enc_xo(rd, rb, ra, 8),
+                    AluOp::Subfe => enc_xo(rd, rb, ra, 136),
                     AluOp::Mulld => enc_xo(rd, ra, rb, 233),
                     AluOp::Mulhd => enc_xo(rd, ra, rb, 73),
                     AluOp::Mulhdu => enc_xo(rd, ra, rb, 9),

@@ -670,12 +670,29 @@ fn valid_for_target(triple: &Triple, op: Opcode, args: &[Type], rets: &[Type]) -
                 op,
                 args,
                 rets,
-                // The ppc64le backend has no 128-bit integer lowerings.
-                (_, &[I128], _),
-                (_, &[_, I128], _),
-                (_, &[I128, _], _),
-                (_, _, &[I128]),
-                // Nor f16/f128.
+                // 128-bit division and remainder are not lowered (as on
+                // most other backends).
+                (
+                    Opcode::Udiv | Opcode::Sdiv | Opcode::Urem | Opcode::Srem,
+                    &[I128, I128],
+                    _
+                ),
+                // Conversions between i128 and floats are not lowered by
+                // any backend (#4933, #4934).
+                (
+                    Opcode::FcvtToUint
+                        | Opcode::FcvtToUintSat
+                        | Opcode::FcvtToSint
+                        | Opcode::FcvtToSintSat,
+                    &[F32 | F64],
+                    &[I128]
+                ),
+                (
+                    Opcode::FcvtFromUint | Opcode::FcvtFromSint,
+                    &[I128],
+                    &[F32 | F64]
+                ),
+                // No f16/f128.
                 (_, &[F16 | F128], _),
                 (_, &[_, F16 | F128], _),
                 (_, &[F16 | F128, _], _),
@@ -687,7 +704,6 @@ fn valid_for_target(triple: &Triple, op: Opcode, args: &[Type], rets: &[Type]) -
                 (Opcode::Bitrev),
                 (Opcode::Bswap),
                 (Opcode::Iabs),
-                (Opcode::Bitselect),
                 (Opcode::Ceil | Opcode::Floor | Opcode::Trunc | Opcode::Nearest),
                 // Narrow div/rem is lowered, but i8/i16 min/max of floats
                 // and the sub-word conversions are not exercised yet.

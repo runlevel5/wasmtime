@@ -9,6 +9,7 @@ target pulley32
 target pulley32be
 target pulley64
 target pulley64be
+target powerpc64le
 
 function %i128_brif_false(i128) -> i8 {
 block0(v0: i128):

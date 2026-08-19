@@ -26,6 +26,20 @@
     (Or)
     (Xor)
     (Mulld)
+    ;; Carrying adds and subtracts for 128-bit arithmetic. `Addc`/`Subfc`
+    ;; set XER.CA and `Adde`/`Subfe` consume it. The pair is emitted as
+    ;; two separate instructions rather than one fused pseudo-instruction
+    ;; because nothing that can appear between them clobbers the carry:
+    ;; the lowering rules place the pair adjacently within one rule, and
+    ;; everything the register allocator or the machine buffer may insert
+    ;; -- `mr` (encoded as `or`), spill loads and stores, `addi` address
+    ;; arithmetic, constant materialization, or a branch around an island
+    ;; -- leaves XER.CA untouched. No other instruction this backend
+    ;; emits writes CA.
+    (Addc)
+    (Adde)
+    (Subfc)
+    (Subfe)
     ;; High half of a 64x64 product.
     (Mulhd)
     (Mulhdu)
@@ -507,6 +521,14 @@
 (rule (ppc_or a b) (alu_rrr (AluOp.Or) a b))
 (decl ppc_xor (Reg Reg) Reg)
 (rule (ppc_xor a b) (alu_rrr (AluOp.Xor) a b))
+(decl ppc_addc (Reg Reg) Reg)
+(rule (ppc_addc a b) (alu_rrr (AluOp.Addc) a b))
+(decl ppc_adde (Reg Reg) Reg)
+(rule (ppc_adde a b) (alu_rrr (AluOp.Adde) a b))
+(decl ppc_subfc (Reg Reg) Reg)
+(rule (ppc_subfc a b) (alu_rrr (AluOp.Subfc) a b))
+(decl ppc_subfe (Reg Reg) Reg)
+(rule (ppc_subfe a b) (alu_rrr (AluOp.Subfe) a b))
 (decl ppc_mulld (Reg Reg) Reg)
 (rule (ppc_mulld a b) (alu_rrr (AluOp.Mulld) a b))
 (decl ppc_mulhd (Reg Reg) Reg)
@@ -536,7 +558,15 @@
 (rule 1 (mask_shift_amount (iconst _ (u64_from_imm64 n)) ty)
   (imm $I64 (u64_and n (ty_shift_mask ty))))
 (rule 0 (mask_shift_amount val ty)
-  (alu_rr_imm16 (AluImmOp.Andi) (put_in_reg val) (shift_mask_u16 ty)))
+  (alu_rr_imm16 (AluImmOp.Andi) (shift_amt_64 val) (shift_mask_u16 ty)))
+
+;; A shift amount as a single register: an `i128` amount contributes
+;; only its low doubleword (the mask discards everything above seven
+;; bits anyway).
+(decl shift_amt_64 (Value) Reg)
+(rule 1 (shift_amt_64 val @ (value_type $I128))
+  (value_regs_get (put_in_regs val) 0))
+(rule 0 (shift_amt_64 val) (put_in_reg val))
 
 (decl shift_mask_u16 (Type) u16)
 (extern constructor shift_mask_u16 shift_mask_u16)
@@ -684,7 +714,11 @@
 
 ;; Sign/zero extension.
 (decl gen_extend (Reg bool u8 u8) Reg)
-(rule (gen_extend val signed from to)
+;; Extending from 64 bits is a no-op: the value already fills the
+;; register. (Reached e.g. by `uextend`/`sextend` from `i64` to `i128`,
+;; where only the high half needs producing.)
+(rule 1 (gen_extend val _ 64 _) val)
+(rule 0 (gen_extend val signed from to)
   (let ((dst WritableReg (temp_writable_reg $I64))
         (_ Unit (emit (MInst.Extend dst val signed from to))))
     dst))
@@ -693,6 +727,19 @@
 ;; constructor implemented in `lower/isle.rs`.
 (decl amode (Value i32) AMode)
 (extern constructor amode amode)
+
+;; The same address eight bytes on, for the high half of an `i128`.
+(decl amode8 (Value i32) AMode)
+(extern constructor amode8 amode8)
+
+;; Condition-code decomposition for ordered 128-bit comparisons: the
+;; strict same-signedness compare for the high halves, and the
+;; unsigned same-strictness compare for the low halves. Both fail on
+;; equal/not-equal.
+(decl pure partial icmp128_hi_cc (IntCC) IntCC)
+(extern constructor icmp128_hi_cc icmp128_hi_cc)
+(decl pure partial icmp128_lo_cc (IntCC) IntCC)
+(extern constructor icmp128_lo_cc icmp128_lo_cc)
 
 (decl load_op_for_type (Type) LoadOP)
 (extern constructor load_op_for_type load_op_for_type)

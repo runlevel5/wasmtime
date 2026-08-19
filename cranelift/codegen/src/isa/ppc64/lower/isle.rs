@@ -135,6 +135,46 @@ impl generated_code::Context for Ppc64IsleContext<'_, '_, MInst, Ppc64Backend> {
         AMode::RegOffset(self.put_in_reg(addr), i64::from(offset))
     }
 
+    /// The high doubleword of an `i128` access: eight bytes past the
+    /// low one. The offset is widened to `i64` first, so it cannot
+    /// overflow.
+    fn amode8(&mut self, addr: Value, offset: i32) -> AMode {
+        AMode::RegOffset(self.put_in_reg(addr), i64::from(offset) + 8)
+    }
+
+    /// The comparison to run on the high halves of an ordered 128-bit
+    /// compare: the strict version of the condition, keeping its
+    /// signedness. Fails on equal/not-equal, which take another path.
+    fn icmp128_hi_cc(&mut self, cc: &IntCC) -> Option<IntCC> {
+        Some(match cc {
+            IntCC::SignedLessThan | IntCC::SignedLessThanOrEqual => IntCC::SignedLessThan,
+            IntCC::SignedGreaterThan | IntCC::SignedGreaterThanOrEqual => {
+                IntCC::SignedGreaterThan
+            }
+            IntCC::UnsignedLessThan | IntCC::UnsignedLessThanOrEqual => IntCC::UnsignedLessThan,
+            IntCC::UnsignedGreaterThan | IntCC::UnsignedGreaterThanOrEqual => {
+                IntCC::UnsignedGreaterThan
+            }
+            IntCC::Equal | IntCC::NotEqual => return None,
+        })
+    }
+
+    /// The comparison for the low halves when the high halves are
+    /// equal: always unsigned, keeping the original strictness.
+    fn icmp128_lo_cc(&mut self, cc: &IntCC) -> Option<IntCC> {
+        Some(match cc {
+            IntCC::SignedLessThan | IntCC::UnsignedLessThan => IntCC::UnsignedLessThan,
+            IntCC::SignedLessThanOrEqual | IntCC::UnsignedLessThanOrEqual => {
+                IntCC::UnsignedLessThanOrEqual
+            }
+            IntCC::SignedGreaterThan | IntCC::UnsignedGreaterThan => IntCC::UnsignedGreaterThan,
+            IntCC::SignedGreaterThanOrEqual | IntCC::UnsignedGreaterThanOrEqual => {
+                IntCC::UnsignedGreaterThanOrEqual
+            }
+            IntCC::Equal | IntCC::NotEqual => return None,
+        })
+    }
+
     fn load_op_for_type(&mut self, ty: Type) -> LoadOP {
         LoadOP::from_type(ty)
     }

@@ -134,18 +134,43 @@
 ;; right-rotation is a left-rotation by the negated amount (which the
 ;; hardware masking reduces mod the width).
 (rule (lower (rotl $I64 x y))
-  (output_reg (gen_shift (ShiftOp.Rotld) (put_in_reg x) (put_in_reg y))))
+  (output_reg (gen_shift (ShiftOp.Rotld) (put_in_reg x) (shift_amt_64 y))))
 
 (rule (lower (rotl $I32 x y))
-  (output_reg (gen_shift (ShiftOp.Rotlw) (put_in_reg x) (put_in_reg y))))
+  (output_reg (gen_shift (ShiftOp.Rotlw) (put_in_reg x) (shift_amt_64 y))))
 
 (rule (lower (rotr $I64 x y))
   (output_reg (gen_shift (ShiftOp.Rotld) (put_in_reg x)
-                         (gen_unary (UnaryOp.Neg) (put_in_reg y)))))
+                         (gen_unary (UnaryOp.Neg) (shift_amt_64 y)))))
 
 (rule (lower (rotr $I32 x y))
   (output_reg (gen_shift (ShiftOp.Rotlw) (put_in_reg x)
-                         (gen_unary (UnaryOp.Neg) (put_in_reg y)))))
+                         (gen_unary (UnaryOp.Neg) (shift_amt_64 y)))))
+
+;; There is no narrow rotate instruction: zero-extend the value so the
+;; wrap-around bits are in a known place, then combine a left and a
+;; right shift. For rotl by n (mod the width): v << n | v >> (width-n);
+;; when n = 0 the right shift is by the full width, which `srw` (a
+;; 32-bit shift of a value at most 16 bits wide) turns into zero.
+(decl narrow_rot (bool Value Value Type) Reg)
+(rule (narrow_rot true x y ty)
+  (let ((v Reg (gen_extend (put_in_reg x) false (ty_bits ty) 64))
+        (n Reg (mask_shift_amount y ty))
+        (back Reg (ppc_sub (imm $I64 (ty_bits_u64 ty)) n)))
+    (ppc_or (gen_shift (ShiftOp.Slw) v n)
+            (gen_shift (ShiftOp.Srw) v back))))
+(rule (narrow_rot false x y ty)
+  (let ((v Reg (gen_extend (put_in_reg x) false (ty_bits ty) 64))
+        (n Reg (mask_shift_amount y ty))
+        (back Reg (ppc_sub (imm $I64 (ty_bits_u64 ty)) n)))
+    (ppc_or (gen_shift (ShiftOp.Srw) v n)
+            (gen_shift (ShiftOp.Slw) v back))))
+
+(rule 1 (lower (rotl (fits_in_16 ty) x y))
+  (output_reg (narrow_rot true x y ty)))
+
+(rule 1 (lower (rotr (fits_in_16 ty) x y))
+  (output_reg (narrow_rot false x y ty)))
 
 ;;;; Rules for bit counting ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -417,6 +442,38 @@
                 (put_in_reg x)
                 (put_in_reg y))))
 
+(rule 3 (lower (select_spectre_guard $I128
+                                     (maybe_uextend (icmp _ cc a @ (value_type (fits_in_64 in_ty)) b))
+                                     x y))
+  (let ((kind IntegerCompare (int_compare cc
+                                          (put_in_cmp_reg a cc in_ty)
+                                          (put_in_cmp_reg b cc in_ty)
+                                          in_ty))
+        (xr ValueRegs (put_in_regs x))
+        (yr ValueRegs (put_in_regs y)))
+    (output (value_regs (gen_select kind (lo xr) (lo yr))
+                        (gen_select kind (hi xr) (hi yr))))))
+
+(rule 2 (lower (select_spectre_guard $I128 c @ (value_type (fits_in_64 cty)) x y))
+  (let ((kind IntegerCompare (int_compare (IntCC.NotEqual)
+                                          (put_in_cmp_reg c (IntCC.NotEqual) cty)
+                                          (imm $I64 0)
+                                          cty))
+        (xr ValueRegs (put_in_regs x))
+        (yr ValueRegs (put_in_regs y)))
+    (output (value_regs (gen_select kind (lo xr) (lo yr))
+                        (gen_select kind (hi xr) (hi yr))))))
+
+(rule 4 (lower (select_spectre_guard $I128 c @ (value_type $I128) x y))
+  (let ((kind IntegerCompare (cond128 c))
+        (xr ValueRegs (put_in_regs x))
+        (yr ValueRegs (put_in_regs y)))
+    (output (value_regs (gen_select kind (lo xr) (lo yr))
+                        (gen_select kind (hi xr) (hi yr))))))
+
+(rule 5 (lower (select_spectre_guard (fits_in_64 (ty_int _)) c @ (value_type $I128) x y))
+  (output_reg (gen_select (cond128 c) (put_in_reg x) (put_in_reg y))))
+
 (rule 0 (lower (select_spectre_guard (fits_in_64 (ty_int _)) c @ (value_type (fits_in_64 cty)) x y))
   (output_reg
     (gen_select (int_compare (IntCC.NotEqual)
@@ -484,6 +541,17 @@
   (output_reg (f32_from_bits (gen_unary (UnaryOp.Not) (f32_to_bits (put_in_reg x))))))
 
 ;;;; Rules for `bitcast` ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(rule (lower (bitcast $I128 _ x @ (value_type $I128)))
+  (output (put_in_regs x)))
+
+;; Same-type bitcasts are no-ops.
+(rule (lower (bitcast $I8 _ x @ (value_type $I8))) (output_reg (put_in_reg x)))
+(rule (lower (bitcast $I16 _ x @ (value_type $I16))) (output_reg (put_in_reg x)))
+(rule (lower (bitcast $I32 _ x @ (value_type $I32))) (output_reg (put_in_reg x)))
+(rule (lower (bitcast $I64 _ x @ (value_type $I64))) (output_reg (put_in_reg x)))
+(rule (lower (bitcast $F32 _ x @ (value_type $F32))) (output_reg (put_in_reg x)))
+(rule (lower (bitcast $F64 _ x @ (value_type $F64))) (output_reg (put_in_reg x)))
 
 (rule (lower (bitcast $I64 _ x @ (value_type $F64)))
   (output_reg (mov_from_fpr (put_in_reg x))))
@@ -654,6 +722,25 @@
                              ty)
                 code)))
 
+;; An `i128` trap condition tests whether either half is non-zero.
+(rule 1 (lower (trapz val @ (value_type $I128) code))
+  (let ((vr ValueRegs (put_in_regs val)))
+    (side_effect
+      (gen_trapif (int_compare (IntCC.Equal)
+                               (ppc_or (value_regs_get vr 0) (value_regs_get vr 1))
+                               (imm $I64 0)
+                               $I64)
+                  code))))
+
+(rule 1 (lower (trapnz val @ (value_type $I128) code))
+  (let ((vr ValueRegs (put_in_regs val)))
+    (side_effect
+      (gen_trapif (int_compare (IntCC.NotEqual)
+                               (ppc_or (value_regs_get vr 0) (value_regs_get vr 1))
+                               (imm $I64 0)
+                               $I64)
+                  code))))
+
 ;;;; Rules for `return` ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ;; N.B.: the Ret itself is generated by the ABI.
@@ -774,3 +861,353 @@
 
 (rule (lower (symbol_value _ (symbol_value_data name _ offset)))
   (output_reg (load_ext_name name offset)))
+
+;;;; Rules for `i128` ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; An `i128` value lives in a pair of GPRs, low doubleword first (see
+;; `rc_for_type`). The rules here follow one convention throughout:
+;; both operands' registers are extracted *before* the first
+;; instruction of a carry chain is emitted, so an `addc`/`adde` (or
+;; `subc`/`sube`) pair is always adjacent in the lowered code, with
+;; nothing between it that could clobber XER.CA.
+
+;; Convenience: the low or high doubleword of a 128-bit value.
+(decl lo (ValueRegs) Reg)
+(rule (lo x) (value_regs_get x 0))
+(decl hi (ValueRegs) Reg)
+(rule (hi x) (value_regs_get x 1))
+
+;;;; `iconcat` / `isplit`
+
+(rule (lower (iconcat $I128 x y))
+  (output (value_regs (put_in_reg x) (put_in_reg y))))
+
+(rule (lower (isplit $I64 x @ (value_type $I128)))
+  (let ((xr ValueRegs (put_in_regs x)))
+    (output_pair (value_reg (lo xr)) (value_reg (hi xr)))))
+
+;;;; Addition, subtraction, negation
+
+(rule 3 (lower (iadd $I128 x y))
+  (let ((xr ValueRegs (put_in_regs x))
+        (yr ValueRegs (put_in_regs y))
+        (lo_sum Reg (ppc_addc (lo xr) (lo yr)))
+        (hi_sum Reg (ppc_adde (hi xr) (hi yr))))
+    (output (value_regs lo_sum hi_sum))))
+
+(rule 3 (lower (isub $I128 x y))
+  (let ((xr ValueRegs (put_in_regs x))
+        (yr ValueRegs (put_in_regs y))
+        (lo_diff Reg (ppc_subfc (lo xr) (lo yr)))
+        (hi_diff Reg (ppc_subfe (hi xr) (hi yr))))
+    (output (value_regs lo_diff hi_diff))))
+
+(rule 1 (lower (ineg $I128 x))
+  (let ((xr ValueRegs (put_in_regs x))
+        (zero Reg (imm $I64 0))
+        (lo_neg Reg (ppc_subfc zero (lo xr)))
+        (hi_neg Reg (ppc_subfe zero (hi xr))))
+    (output (value_regs lo_neg hi_neg))))
+
+;;;; Multiplication
+;;
+;; (a_hi:a_lo) * (b_hi:b_lo) mod 2^128: the low doubleword is the low
+;; half of a_lo*b_lo; the high doubleword collects the upper half of
+;; that product plus the two cross products (whose own upper halves
+;; fall outside 128 bits).
+
+(rule 1 (lower (imul $I128 x y))
+  (let ((xr ValueRegs (put_in_regs x))
+        (yr ValueRegs (put_in_regs y))
+        (lo_prod Reg (ppc_mulld (lo xr) (lo yr)))
+        (carry Reg (ppc_mulhdu (lo xr) (lo yr)))
+        (cross1 Reg (ppc_mulld (hi xr) (lo yr)))
+        (cross2 Reg (ppc_mulld (lo xr) (hi yr)))
+        (hi_prod Reg (ppc_add carry (ppc_add cross1 cross2))))
+    (output (value_regs lo_prod hi_prod))))
+
+;;;; Bitwise logic
+
+(rule 1 (lower (band $I128 x y))
+  (let ((xr ValueRegs (put_in_regs x))
+        (yr ValueRegs (put_in_regs y)))
+    (output (value_regs (ppc_and (lo xr) (lo yr)) (ppc_and (hi xr) (hi yr))))))
+
+(rule 1 (lower (bor $I128 x y))
+  (let ((xr ValueRegs (put_in_regs x))
+        (yr ValueRegs (put_in_regs y)))
+    (output (value_regs (ppc_or (lo xr) (lo yr)) (ppc_or (hi xr) (hi yr))))))
+
+(rule 1 (lower (bxor $I128 x y))
+  (let ((xr ValueRegs (put_in_regs x))
+        (yr ValueRegs (put_in_regs y)))
+    (output (value_regs (ppc_xor (lo xr) (lo yr)) (ppc_xor (hi xr) (hi yr))))))
+
+(rule 1 (lower (bnot $I128 x))
+  (let ((xr ValueRegs (put_in_regs x)))
+    (output (value_regs (gen_unary (UnaryOp.Not) (lo xr))
+                        (gen_unary (UnaryOp.Not) (hi xr))))))
+
+;;;; Extension and truncation
+
+(rule 1 (lower (uextend $I128 val @ (value_type in_ty)))
+  (output (value_regs (gen_extend (put_in_reg val) false (ty_bits in_ty) 64)
+                      (imm $I64 0))))
+
+(rule 1 (lower (sextend $I128 val @ (value_type in_ty)))
+  (let ((lo_half Reg (gen_extend (put_in_reg val) true (ty_bits in_ty) 64))
+        (hi_half Reg (gen_shift (ShiftOp.Srad) lo_half (imm $I64 63))))
+    (output (value_regs lo_half hi_half))))
+
+(rule 1 (lower (ireduce _ val @ (value_type $I128)))
+  (output_reg (lo (put_in_regs val))))
+
+;;;; Loads and stores
+;;
+;; Two doubleword accesses, low half at the lower address. A trap can
+;; land between the halves, which CLIF permits for a multi-word access.
+
+(rule 1 (lower (load $I128 (little_or_native_endian flags) addr offset))
+  (let ((lo_half Reg (gen_load $I64 (amode addr offset) flags))
+        (hi_half Reg (gen_load $I64 (amode8 addr offset) flags)))
+    (output (value_regs lo_half hi_half))))
+
+(rule 1 (lower (store (little_or_native_endian flags)
+                      val @ (value_type $I128) addr offset))
+  (let ((vr ValueRegs (put_in_regs val)))
+    (side_effect
+      (side_effect_concat
+        (gen_store $I64 (amode addr offset) flags (lo vr))
+        (gen_store $I64 (amode8 addr offset) flags (hi vr))))))
+
+;;;; Comparisons
+;;
+;; Equality is a bit-level question: OR together the XORs of the two
+;; halves and test for zero. The ordered comparisons decompose as
+;; "high halves strictly ordered, or high halves equal and low halves
+;; unsigned-ordered" -- the low half is always compared unsigned
+;; because it carries no sign.
+
+(rule 2 (lower (icmp _ (IntCC.Equal) x @ (value_type $I128) y))
+  (let ((xr ValueRegs (put_in_regs x))
+        (yr ValueRegs (put_in_regs y))
+        (diff Reg (ppc_or (ppc_xor (lo xr) (lo yr)) (ppc_xor (hi xr) (hi yr)))))
+    (output_reg (cmp_set (int_compare (IntCC.Equal) diff (imm $I64 0) $I64)))))
+
+(rule 2 (lower (icmp _ (IntCC.NotEqual) x @ (value_type $I128) y))
+  (let ((xr ValueRegs (put_in_regs x))
+        (yr ValueRegs (put_in_regs y))
+        (diff Reg (ppc_or (ppc_xor (lo xr) (lo yr)) (ppc_xor (hi xr) (hi yr)))))
+    (output_reg (cmp_set (int_compare (IntCC.NotEqual) diff (imm $I64 0) $I64)))))
+
+(decl icmp128_ordered (IntCC ValueRegs ValueRegs) Reg)
+(rule (icmp128_ordered cc xr yr)
+  (if-let hi_cc (icmp128_hi_cc cc))
+  (if-let lo_cc (icmp128_lo_cc cc))
+  (let ((hi_strict Reg (cmp_set (int_compare hi_cc (hi xr) (hi yr) $I64)))
+        (hi_eq Reg (cmp_set (int_compare (IntCC.Equal) (hi xr) (hi yr) $I64)))
+        (lo_cmp Reg (cmp_set (int_compare lo_cc (lo xr) (lo yr) $I64))))
+    (ppc_or hi_strict (ppc_and hi_eq lo_cmp))))
+
+(rule 1 (lower (icmp _ cc x @ (value_type $I128) y))
+  (output_reg (icmp128_ordered cc (put_in_regs x) (put_in_regs y))))
+
+;;;; Selects
+
+;; A select producing an `i128` runs the same compare-and-isel once
+;; per half.
+(rule 6 (lower (select $I128
+                       (maybe_uextend (icmp _ cc a @ (value_type (fits_in_64 in_ty)) b))
+                       x y))
+  (let ((kind IntegerCompare (int_compare cc
+                                          (put_in_cmp_reg a cc in_ty)
+                                          (put_in_cmp_reg b cc in_ty)
+                                          in_ty))
+        (xr ValueRegs (put_in_regs x))
+        (yr ValueRegs (put_in_regs y)))
+    (output (value_regs (gen_select kind (lo xr) (lo yr))
+                        (gen_select kind (hi xr) (hi yr))))))
+
+(rule 5 (lower (select $I128 c @ (value_type (fits_in_64 cty)) x y))
+  (let ((kind IntegerCompare (int_compare (IntCC.NotEqual)
+                                          (put_in_cmp_reg c (IntCC.NotEqual) cty)
+                                          (imm $I64 0)
+                                          cty))
+        (xr ValueRegs (put_in_regs x))
+        (yr ValueRegs (put_in_regs y)))
+    (output (value_regs (gen_select kind (lo xr) (lo yr))
+                        (gen_select kind (hi xr) (hi yr))))))
+
+;; An `i128` condition is truthy when either half is non-zero.
+(decl cond128 (Value) IntegerCompare)
+(rule (cond128 c)
+  (let ((cr ValueRegs (put_in_regs c)))
+    (int_compare (IntCC.NotEqual) (ppc_or (lo cr) (hi cr)) (imm $I64 0) $I64)))
+
+(rule 4 (lower (select $I128 c @ (value_type $I128) x y))
+  (let ((kind IntegerCompare (cond128 c))
+        (xr ValueRegs (put_in_regs x))
+        (yr ValueRegs (put_in_regs y)))
+    (output (value_regs (gen_select kind (lo xr) (lo yr))
+                        (gen_select kind (hi xr) (hi yr))))))
+
+(rule 7 (lower (select (fits_in_64 (ty_int _)) c @ (value_type $I128) x y))
+  (output_reg (gen_select (cond128 c) (put_in_reg x) (put_in_reg y))))
+
+(rule 8 (lower (select (ty_scalar_float ty) c @ (value_type $I128) x y))
+  (output_reg (gen_fpu_select (cond128 c) (put_in_reg x) (put_in_reg y) ty)))
+
+;;;; Branch on an `i128` condition
+
+(rule 3 (lower_branch (brif val @ (value_type $I128) _ _)
+                      (two_targets taken not_taken))
+  (emit_side_effect (ppc_cond_br (cond128 val) taken not_taken)))
+
+;;;; Shifts
+;;
+;; `sld`/`srd`/`srad` consume seven bits of shift amount: the shifts
+;; produce zero (`srad`: all sign bits) for amounts 64-127. That makes
+;; the classic branchless double-register sequences work for the full
+;; 0-127 range. For a left shift by n:
+;;
+;;   lo' = lo << n
+;;   hi' = (hi << n) | (lo >> (64-n)) | (lo << (n-64))
+;;
+;; For n = 0 both correction terms shift by 64 (mod 128) and vanish;
+;; for n in 1..63 the second term carries lo's high bits in; for n in
+;; 64..127 the first two terms vanish and the third places lo alone.
+;; Right shifts mirror this. The arithmetic right shift needs one
+;; `isel` because for n >= 64 the low half is `hi >> (n-64)` with sign
+;; fill, which no OR of unsigned pieces produces.
+
+(decl shl128 (ValueRegs Reg) ValueRegs)
+(rule (shl128 x amt)
+  (let ((n Reg (alu_rr_imm16 (AluImmOp.Andi) amt 127))
+        (lo_out Reg (gen_shift (ShiftOp.Sld) (lo x) n))
+        (nback Reg (ppc_sub (imm $I64 64) n))
+        (nbig Reg (gen_unary (UnaryOp.Neg) nback))
+        (hi_out Reg (ppc_or (ppc_or (gen_shift (ShiftOp.Sld) (hi x) n)
+                                    (gen_shift (ShiftOp.Srd) (lo x) nback))
+                            (gen_shift (ShiftOp.Sld) (lo x) nbig))))
+    (value_regs lo_out hi_out)))
+
+(decl ushr128 (ValueRegs Reg) ValueRegs)
+(rule (ushr128 x amt)
+  (let ((n Reg (alu_rr_imm16 (AluImmOp.Andi) amt 127))
+        (hi_out Reg (gen_shift (ShiftOp.Srd) (hi x) n))
+        (nback Reg (ppc_sub (imm $I64 64) n))
+        (nbig Reg (gen_unary (UnaryOp.Neg) nback))
+        (lo_out Reg (ppc_or (ppc_or (gen_shift (ShiftOp.Srd) (lo x) n)
+                                    (gen_shift (ShiftOp.Sld) (hi x) nback))
+                            (gen_shift (ShiftOp.Srd) (hi x) nbig))))
+    (value_regs lo_out hi_out)))
+
+(decl sshr128 (ValueRegs Reg) ValueRegs)
+(rule (sshr128 x amt)
+  (let ((n Reg (alu_rr_imm16 (AluImmOp.Andi) amt 127))
+        (c64 Reg (imm $I64 64))
+        (hi_out Reg (gen_shift (ShiftOp.Srad) (hi x) n))
+        (nback Reg (ppc_sub c64 n))
+        (nbig Reg (gen_unary (UnaryOp.Neg) nback))
+        (lo_small Reg (ppc_or (gen_shift (ShiftOp.Srd) (lo x) n)
+                              (gen_shift (ShiftOp.Sld) (hi x) nback)))
+        (lo_big Reg (gen_shift (ShiftOp.Srad) (hi x) nbig))
+        (lo_out Reg (gen_select (int_compare (IntCC.UnsignedLessThan) n c64 $I64)
+                                lo_small lo_big)))
+    (value_regs lo_out hi_out)))
+
+(rule 3 (lower (ishl $I128 x y))
+  (output (shl128 (put_in_regs x) (shift_amt_64 y))))
+
+(rule 3 (lower (ushr $I128 x y))
+  (output (ushr128 (put_in_regs x) (shift_amt_64 y))))
+
+(rule 3 (lower (sshr $I128 x y))
+  (output (sshr128 (put_in_regs x) (shift_amt_64 y))))
+
+;;;; Rotates
+;;
+;; rot(x, n) = shifted-one-way OR shifted-the-other-way-by(-n); both
+;; helpers mask their amount mod 128, and (-n) mod 128 = 128-n, so
+;; n = 0 degenerates to x | x.
+
+(decl or128 (ValueRegs ValueRegs) ValueRegs)
+(rule (or128 x y)
+  (value_regs (ppc_or (lo x) (lo y)) (ppc_or (hi x) (hi y))))
+
+(rule 2 (lower (rotl $I128 x y))
+  (let ((xr ValueRegs (put_in_regs x))
+        (n Reg (shift_amt_64 y)))
+    (output (or128 (shl128 xr n)
+                   (ushr128 xr (gen_unary (UnaryOp.Neg) n))))))
+
+(rule 2 (lower (rotr $I128 x y))
+  (let ((xr ValueRegs (put_in_regs x))
+        (n Reg (shift_amt_64 y)))
+    (output (or128 (ushr128 xr n)
+                   (shl128 xr (gen_unary (UnaryOp.Neg) n))))))
+
+;;;; Bit counting
+;;
+;; The result of a 128-bit count fits in seven bits, so the high half
+;; of the result is always zero.
+
+(rule 2 (lower (clz $I128 x))
+  (let ((xr ValueRegs (put_in_regs x))
+        (count_hi Reg (gen_bitcount (BitOp.Clz) (hi xr) $I64))
+        (count_lo Reg (ppc_add (gen_bitcount (BitOp.Clz) (lo xr) $I64)
+                               (imm $I64 64)))
+        (res Reg (gen_select (int_compare (IntCC.Equal) (hi xr) (imm $I64 0) $I64)
+                             count_lo count_hi)))
+    (output (value_regs res (imm $I64 0)))))
+
+(rule 2 (lower (ctz $I128 x))
+  (let ((xr ValueRegs (put_in_regs x))
+        (count_lo Reg (gen_bitcount (BitOp.Ctz) (lo xr) $I64))
+        (count_hi Reg (ppc_add (gen_bitcount (BitOp.Ctz) (hi xr) $I64)
+                               (imm $I64 64)))
+        (res Reg (gen_select (int_compare (IntCC.Equal) (lo xr) (imm $I64 0) $I64)
+                             count_hi count_lo)))
+    (output (value_regs res (imm $I64 0)))))
+
+(rule 2 (lower (popcnt $I128 x))
+  (let ((xr ValueRegs (put_in_regs x)))
+    (output (value_regs (ppc_add (gen_bitcount (BitOp.Popcnt) (lo xr) $I64)
+                                 (gen_bitcount (BitOp.Popcnt) (hi xr) $I64))
+                        (imm $I64 0)))))
+
+;;;; Integer min/max
+
+;; Compare once (a 0/1 result), then select each half on it.
+(decl minmax128 (IntCC Value Value) InstOutput)
+(rule (minmax128 cc x y)
+  (let ((xr ValueRegs (put_in_regs x))
+        (yr ValueRegs (put_in_regs y))
+        (kind IntegerCompare (int_compare (IntCC.NotEqual)
+                                          (icmp128_ordered cc xr yr)
+                                          (imm $I64 0)
+                                          $I64)))
+    (output (value_regs (gen_select kind (lo xr) (lo yr))
+                        (gen_select kind (hi xr) (hi yr))))))
+
+(rule 1 (lower (smin $I128 x y)) (minmax128 (IntCC.SignedLessThan) x y))
+(rule 1 (lower (smax $I128 x y)) (minmax128 (IntCC.SignedGreaterThan) x y))
+(rule 1 (lower (umin $I128 x y)) (minmax128 (IntCC.UnsignedLessThan) x y))
+(rule 1 (lower (umax $I128 x y)) (minmax128 (IntCC.UnsignedGreaterThan) x y))
+
+;;;; `bitselect`: (x & mask) | (y & ~mask)
+
+(decl bitselect64 (Reg Reg Reg) Reg)
+(rule (bitselect64 mask x y)
+  (ppc_or (ppc_and mask x)
+          (ppc_and (gen_unary (UnaryOp.Not) mask) y)))
+
+(rule (lower (bitselect (fits_in_64 (ty_int _)) mask x y))
+  (output_reg (bitselect64 (put_in_reg mask) (put_in_reg x) (put_in_reg y))))
+
+(rule 1 (lower (bitselect $I128 mask x y))
+  (let ((mr ValueRegs (put_in_regs mask))
+        (xr ValueRegs (put_in_regs x))
+        (yr ValueRegs (put_in_regs y)))
+    (output (value_regs (bitselect64 (lo mr) (lo xr) (lo yr))
+                        (bitselect64 (hi mr) (hi xr) (hi yr))))))

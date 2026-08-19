@@ -5,6 +5,7 @@ set preserve_frame_pointers=true
 set enable_llvm_abi_extensions=true
 
 target x86_64
+target powerpc64le
 ;; target aarch64
 ;; target riscv64
 ;; target s390x

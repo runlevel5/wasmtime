@@ -6,6 +6,7 @@ target aarch64
 target riscv64
 set enable_multi_ret_implicit_sret
 target s390x
+target powerpc64le
 
 function %trapnz(i64) -> i64 {
 block0(v0: i64):

@@ -208,6 +208,10 @@ mod tests {
         assert_eq!(enc_d_logic(24, 0, 0, 0), NOP_INSTRUCTION); // nop
         assert_eq!(enc_xo(3, 4, 5, 266), 0x7C64_2A14); // add r3, r4, r5
         assert_eq!(enc_xo(3, 4, 5, 40), 0x7C64_2850); // subf r3, r4, r5
+        assert_eq!(enc_xo(3, 4, 5, 10), 0x7C64_2814); // addc r3, r4, r5
+        assert_eq!(enc_xo(3, 4, 5, 138), 0x7C64_2914); // adde r3, r4, r5
+        assert_eq!(enc_xo(3, 5, 4, 8), 0x7C65_2010); // subfc r3, r5, r4
+        assert_eq!(enc_xo(3, 5, 4, 136), 0x7C65_2110); // subfe r3, r5, r4
         assert_eq!(enc_x_logic(4, 3, 5, 444), 0x7C83_2B78); // or r3, r4, r5
         assert_eq!(enc_ds(58, 3, 1, 16, 0), 0xE861_0010); // ld r3, 16(r1)
         assert_eq!(enc_ds(62, 3, 1, 16, 0), 0xF861_0010); // std r3, 16(r1)

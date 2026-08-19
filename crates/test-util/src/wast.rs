@@ -450,14 +450,10 @@ impl Compiler {
                     return true;
                 }
 
-                // The ppc64le backend has no vector or 128-bit-integer
-                // lowerings yet; these proposals are force-disabled for it
-                // in `Config::compiler_panicking_wasm_features`.
-                if cfg!(target_arch = "powerpc64")
-                    && (config.simd()
-                        || config.relaxed_simd()
-                        || config.wide_arithmetic())
-                {
+                // The ppc64le backend has no vector lowerings yet; the
+                // SIMD proposals are force-disabled for it in
+                // `Config::compiler_panicking_wasm_features`.
+                if cfg!(target_arch = "powerpc64") && (config.simd() || config.relaxed_simd()) {
                     return true;
                 }
 

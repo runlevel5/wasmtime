@@ -5,6 +5,7 @@ target aarch64
 target x86_64
 set enable_multi_ret_implicit_sret
 target s390x
+target powerpc64le
 
 function %bitcast_i8(i8) -> i8 {
 block0(v0: i8):

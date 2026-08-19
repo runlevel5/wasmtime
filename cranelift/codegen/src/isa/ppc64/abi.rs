@@ -149,6 +149,17 @@ impl ABIMachineSpec for Ppc64MachineDeps {
             }
 
             let (rcs, reg_tys) = Inst::rc_for_type(&param.value_type)?;
+
+            // An `i128` is simply two adjacent doubleword slots, low
+            // half first; each half is allocated independently by the
+            // loop below. ELFv2 packs `__int128` into whatever two
+            // consecutive slots come next -- no quadword alignment, and
+            // the pair may straddle the last GPR and the stack (GCC and
+            // Clang both place the ninth doubleword of arguments in r10
+            // and the tenth in the parameter save area, even when they
+            // are halves of one `__int128`).
+            debug_assert!(rcs.len() <= 2);
+
             let mut slots = ABIArgSlotVec::new();
             for (rc, reg_ty) in rcs.iter().zip(reg_tys.iter()) {
                 let next_reg = if positional {

@@ -2,6 +2,7 @@ test interpret
 test run
 target riscv64
 target riscv64 has_c has_zcb
+target powerpc64le
 
 function %a(i16) -> i128 system_v {
 block0(v0: i16):
