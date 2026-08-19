@@ -619,6 +619,52 @@ Everything in Phase 4 is now done:
 wide-arithmetic, f16/f128, and `stack-switching` (x86_64-unix only
 upstream). Phase 7 (big-endian) unchanged.
 
+### i128 / wide-arithmetic — complete (2026-08-19)
+
+An `i128` lives in a GPR pair, low doubleword first. Design notes and
+post-mortems:
+
+- **ELFv2 placement is dense, not aligned.** The first design aligned
+  `__int128` to an even doubleword slot the way AAPCS64 does; checking
+  GCC and Clang on the POWER9 box showed ELFv2 does no such thing: the
+  pair takes the next two slots wherever they fall, and may straddle
+  r10 and the parameter save area (7 longs + `__int128` puts the low
+  half in r10 and the high half at SP+96). Deleting the alignment
+  special case made `compute_arg_locs` handle pairs with no extra code
+  at all — each half allocates independently. Verify-against-native
+  before blessing, always.
+- **Carry chains are safe as separate MInsts.** `addc`/`adde` and
+  `subc`/`sube` are emitted as ordinary AluRRR instructions, not a
+  fused pseudo: nothing the register allocator or MachBuffer can
+  insert between them (mr/spills/`addi`/islands) touches XER.CA, and
+  no other instruction the backend emits writes CA. Rules extract all
+  operand registers before emitting the first half so the pair stays
+  adjacent.
+- **Shifts use the 7-bit shift-amount saturation.** `sld`/`srd`/`srad`
+  produce zero (or sign fill) for amounts 64–127, which makes the
+  classic branchless double-register sequences valid across the whole
+  0–127 range; only `sshr` needs one `isel`. Rotates compose the two
+  shift helpers; `(-n) & 127` supplies the complementary amount.
+- **Ordered icmp decomposes** as `hi <strict> || (hi == && lo <uns>)`
+  — three `cmp_set`s and two logicals; eq/ne are an XOR/OR/compare.
+- **Bugs only hardware caught** (macOS "runtests" for a cross target
+  are silently *skipped*, not compiled — never trust a local PASS on a
+  `test run` file): sign-extend-from-64 hit an emit-time
+  `unreachable`; identity bitcasts and i8/i16 rotates had never been
+  implemented; `select_spectre_guard.i128` was missing.
+- Also picked up along the way: `bitselect` (all int widths), i128
+  smin/smax/umin/umax, bmask stayed ≤64, identity bitcasts for every
+  scalar type, and i128 shift *amounts* on narrower shifts.
+- wide-arithmetic is ungated in wasmtime (config, wast harness, docs
+  table now ✅); fuzzgen generates i128 except div/rem, matching other
+  backends. `i64.add128/sub128/mul_wide_{s,u}` lower to exactly the
+  expected instruction pairs (`addc/adde`, `subc/sube`,
+  `mulld/mulhd(u)`).
+- Still out of scope: i128 div/rem (only s390x lowers these), `cls`,
+  `bswap`/`bitrev`/`iabs` (all widths), `nearest` (PPC's `frin`
+  rounds ties away from zero, not to even — needs a fixup sequence),
+  128-bit atomics.
+
 ### Phase 5 — SIMD via VSX (optional, +2–3 months)
 
 ~236 SIMD ops; POWER8 VSX covers most of wasm SIMD but the patch's SIMD
