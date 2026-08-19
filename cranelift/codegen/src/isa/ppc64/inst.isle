@@ -211,6 +211,18 @@
       (ra Reg)
       (rb Reg))
 
+    ;; Shift by a constant amount. PPC has no shift-immediate opcodes as
+    ;; such: the doubleword forms are `rldicl`/`rldicr` (rotate-and-mask)
+    ;; and the word forms `rlwinm`, with only the arithmetic shifts
+    ;; (`sradi`/`srawi`) having dedicated immediate encodings. The
+    ;; lowering rules pre-mask the amount to the type's width, so it is
+    ;; always in range for the selected form.
+    (ShiftRRImm
+      (op ShiftOp)
+      (rd WritableReg)
+      (ra Reg)
+      (imm u8))
+
     ;; Bit count. `ty` selects the word or doubleword form and, for
     ;; trailing zeros without ISA 3.0, the emulation sequence.
     (BitCount
@@ -643,6 +655,21 @@
   (let ((dst WritableReg (temp_writable_reg $I64))
         (_ Unit (emit (MInst.UnaryRR op dst rn))))
     dst))
+
+(decl gen_shift_imm (ShiftOp Reg u8) Reg)
+(rule (gen_shift_imm op ra imm)
+  (let ((dst WritableReg (temp_writable_reg $I64))
+        (_ Unit (emit (MInst.ShiftRRImm op dst ra imm))))
+    dst))
+
+;; Mask a constant shift amount to the type's width, as CLIF requires.
+(decl shift_imm (u64 Type) u8)
+(extern constructor shift_imm shift_imm)
+
+;; The complementary amount for turning a right rotate into a left one:
+;; (bits - n) mod bits.
+(decl rot_imm_neg (u64 Type) u8)
+(extern constructor rot_imm_neg rot_imm_neg)
 
 (decl gen_shift (ShiftOp Reg Reg) Reg)
 (rule (gen_shift op ra rb)

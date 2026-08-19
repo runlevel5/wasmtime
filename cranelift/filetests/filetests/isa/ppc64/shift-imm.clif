@@ -1,157 +1,9 @@
 test compile precise-output
 target powerpc64le
 
-function %shl_i64(i64, i64) -> i64 {
-block0(v0: i64, v1: i64):
-    v2 = ishl v0, v1
-    return v2
-}
-
-; VCode:
-;   mflr r0
-;   load_addr sp, -16(sp)
-;   std r0, 8(sp)
-;   std fp, 0(sp)
-;   mr fp, sp
-; block0:
-;   andi. r4, r4, 63
-;   sld r3, r3, r4
-;   ld r0, 8(sp)
-;   mtlr r0
-;   ld fp, 0(sp)
-;   load_addr sp, 16(sp)
-;   blr
-;
-; Disassembled:
-; block0: ; offset 0x0
-;   mflr r0
-;   addi r1, r1, -0x10
-;   std r0, 8(r1)
-;   std r31, 0(r1)
-;   ori r31, r1, 0
-; block1: ; offset 0x14
-;   andi. r4, r4, 0x3f
-;   sld r3, r3, r4
-;   ld r0, 8(r1)
-;   mtlr r0
-;   ld r31, 0(r1)
-;   addi r1, r1, 0x10
-;   blr
-
-function %shr_i64(i64, i64) -> i64 {
-block0(v0: i64, v1: i64):
-    v2 = ushr v0, v1
-    return v2
-}
-
-; VCode:
-;   mflr r0
-;   load_addr sp, -16(sp)
-;   std r0, 8(sp)
-;   std fp, 0(sp)
-;   mr fp, sp
-; block0:
-;   andi. r4, r4, 63
-;   srd r3, r3, r4
-;   ld r0, 8(sp)
-;   mtlr r0
-;   ld fp, 0(sp)
-;   load_addr sp, 16(sp)
-;   blr
-;
-; Disassembled:
-; block0: ; offset 0x0
-;   mflr r0
-;   addi r1, r1, -0x10
-;   std r0, 8(r1)
-;   std r31, 0(r1)
-;   ori r31, r1, 0
-; block1: ; offset 0x14
-;   andi. r4, r4, 0x3f
-;   srd r3, r3, r4
-;   ld r0, 8(r1)
-;   mtlr r0
-;   ld r31, 0(r1)
-;   addi r1, r1, 0x10
-;   blr
-
-function %sar_i64(i64, i64) -> i64 {
-block0(v0: i64, v1: i64):
-    v2 = sshr v0, v1
-    return v2
-}
-
-; VCode:
-;   mflr r0
-;   load_addr sp, -16(sp)
-;   std r0, 8(sp)
-;   std fp, 0(sp)
-;   mr fp, sp
-; block0:
-;   andi. r4, r4, 63
-;   srad r3, r3, r4
-;   ld r0, 8(sp)
-;   mtlr r0
-;   ld fp, 0(sp)
-;   load_addr sp, 16(sp)
-;   blr
-;
-; Disassembled:
-; block0: ; offset 0x0
-;   mflr r0
-;   addi r1, r1, -0x10
-;   std r0, 8(r1)
-;   std r31, 0(r1)
-;   ori r31, r1, 0
-; block1: ; offset 0x14
-;   andi. r4, r4, 0x3f
-;   srad r3, r3, r4
-;   ld r0, 8(r1)
-;   mtlr r0
-;   ld r31, 0(r1)
-;   addi r1, r1, 0x10
-;   blr
-
-function %shl_i32(i32, i32) -> i32 {
-block0(v0: i32, v1: i32):
-    v2 = ishl v0, v1
-    return v2
-}
-
-; VCode:
-;   mflr r0
-;   load_addr sp, -16(sp)
-;   std r0, 8(sp)
-;   std fp, 0(sp)
-;   mr fp, sp
-; block0:
-;   andi. r4, r4, 31
-;   slw r3, r3, r4
-;   ld r0, 8(sp)
-;   mtlr r0
-;   ld fp, 0(sp)
-;   load_addr sp, 16(sp)
-;   blr
-;
-; Disassembled:
-; block0: ; offset 0x0
-;   mflr r0
-;   addi r1, r1, -0x10
-;   std r0, 8(r1)
-;   std r31, 0(r1)
-;   ori r31, r1, 0
-; block1: ; offset 0x14
-;   andi. r4, r4, 0x1f
-;   slw r3, r3, r4
-;   ld r0, 8(r1)
-;   mtlr r0
-;   ld r31, 0(r1)
-;   addi r1, r1, 0x10
-;   blr
-
-function %shl_const_oversized(i64) -> i64 {
+function %shl_i64_c(i64) -> i64 {
 block0(v0: i64):
-    v1 = iconst.i64 70
+    v1 = iconst.i64 7
     v2 = ishl v0, v1
     return v2
 }
@@ -163,7 +15,7 @@ block0(v0: i64):
 ;   std fp, 0(sp)
 ;   mr fp, sp
 ; block0:
-;   sldi r3, r3, 6
+;   sldi r3, r3, 7
 ;   ld r0, 8(sp)
 ;   mtlr r0
 ;   ld fp, 0(sp)
@@ -178,15 +30,16 @@ block0(v0: i64):
 ;   std r31, 0(r1)
 ;   ori r31, r1, 0
 ; block1: ; offset 0x14
-;   sldi r3, r3, 6
+;   sldi r3, r3, 7
 ;   ld r0, 8(r1)
 ;   mtlr r0
 ;   ld r31, 0(r1)
 ;   addi r1, r1, 0x10
 ;   blr
 
-function %shr_i8(i8, i8) -> i8 {
-block0(v0: i8, v1: i8):
+function %ushr_i64_c(i64) -> i64 {
+block0(v0: i64):
+    v1 = iconst.i64 7
     v2 = ushr v0, v1
     return v2
 }
@@ -198,9 +51,7 @@ block0(v0: i8, v1: i8):
 ;   std fp, 0(sp)
 ;   mr fp, sp
 ; block0:
-;   zext.8->64 r3, r3
-;   andi. r5, r4, 7
-;   srw r3, r3, r5
+;   srdi r3, r3, 7
 ;   ld r0, 8(sp)
 ;   mtlr r0
 ;   ld fp, 0(sp)
@@ -215,17 +66,16 @@ block0(v0: i8, v1: i8):
 ;   std r31, 0(r1)
 ;   ori r31, r1, 0
 ; block1: ; offset 0x14
-;   clrldi r3, r3, 0x38
-;   andi. r5, r4, 7
-;   srw r3, r3, r5
+;   rldicl r3, r3, 0x39, 7
 ;   ld r0, 8(r1)
 ;   mtlr r0
 ;   ld r31, 0(r1)
 ;   addi r1, r1, 0x10
 ;   blr
 
-function %sar_i16(i16, i16) -> i16 {
-block0(v0: i16, v1: i16):
+function %sshr_i64_c(i64) -> i64 {
+block0(v0: i64):
+    v1 = iconst.i64 7
     v2 = sshr v0, v1
     return v2
 }
@@ -237,9 +87,7 @@ block0(v0: i16, v1: i16):
 ;   std fp, 0(sp)
 ;   mr fp, sp
 ; block0:
-;   sext.16->64 r3, r3
-;   andi. r5, r4, 15
-;   sraw r3, r3, r5
+;   sradi r3, r3, 7
 ;   ld r0, 8(sp)
 ;   mtlr r0
 ;   ld fp, 0(sp)
@@ -254,17 +102,16 @@ block0(v0: i16, v1: i16):
 ;   std r31, 0(r1)
 ;   ori r31, r1, 0
 ; block1: ; offset 0x14
-;   extsh r3, r3
-;   andi. r5, r4, 0xf
-;   sraw r3, r3, r5
+;   sradi r3, r3, 7
 ;   ld r0, 8(r1)
 ;   mtlr r0
 ;   ld r31, 0(r1)
 ;   addi r1, r1, 0x10
 ;   blr
 
-function %rotl_i64(i64, i64) -> i64 {
-block0(v0: i64, v1: i64):
+function %rotl_i64_c(i64) -> i64 {
+block0(v0: i64):
+    v1 = iconst.i64 7
     v2 = rotl v0, v1
     return v2
 }
@@ -276,7 +123,7 @@ block0(v0: i64, v1: i64):
 ;   std fp, 0(sp)
 ;   mr fp, sp
 ; block0:
-;   rotld r3, r3, r4
+;   rotldi r3, r3, 7
 ;   ld r0, 8(sp)
 ;   mtlr r0
 ;   ld fp, 0(sp)
@@ -291,15 +138,16 @@ block0(v0: i64, v1: i64):
 ;   std r31, 0(r1)
 ;   ori r31, r1, 0
 ; block1: ; offset 0x14
-;   rotld r3, r3, r4
+;   rotldi r3, r3, 7
 ;   ld r0, 8(r1)
 ;   mtlr r0
 ;   ld r31, 0(r1)
 ;   addi r1, r1, 0x10
 ;   blr
 
-function %rotr_i32(i32, i32) -> i32 {
-block0(v0: i32, v1: i32):
+function %rotr_i64_c(i64) -> i64 {
+block0(v0: i64):
+    v1 = iconst.i64 7
     v2 = rotr v0, v1
     return v2
 }
@@ -311,8 +159,7 @@ block0(v0: i32, v1: i32):
 ;   std fp, 0(sp)
 ;   mr fp, sp
 ; block0:
-;   neg r4, r4
-;   rotlw r3, r3, r4
+;   rotldi r3, r3, 57
 ;   ld r0, 8(sp)
 ;   mtlr r0
 ;   ld fp, 0(sp)
@@ -327,8 +174,259 @@ block0(v0: i32, v1: i32):
 ;   std r31, 0(r1)
 ;   ori r31, r1, 0
 ; block1: ; offset 0x14
-;   neg r4, r4
-;   rotlw r3, r3, r4
+;   rotldi r3, r3, 0x39
+;   ld r0, 8(r1)
+;   mtlr r0
+;   ld r31, 0(r1)
+;   addi r1, r1, 0x10
+;   blr
+
+function %shl_i32_c(i32) -> i32 {
+block0(v0: i32):
+    v1 = iconst.i32 7
+    v2 = ishl v0, v1
+    return v2
+}
+
+; VCode:
+;   mflr r0
+;   load_addr sp, -16(sp)
+;   std r0, 8(sp)
+;   std fp, 0(sp)
+;   mr fp, sp
+; block0:
+;   slwi r3, r3, 7
+;   ld r0, 8(sp)
+;   mtlr r0
+;   ld fp, 0(sp)
+;   load_addr sp, 16(sp)
+;   blr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   mflr r0
+;   addi r1, r1, -0x10
+;   std r0, 8(r1)
+;   std r31, 0(r1)
+;   ori r31, r1, 0
+; block1: ; offset 0x14
+;   slwi r3, r3, 7
+;   ld r0, 8(r1)
+;   mtlr r0
+;   ld r31, 0(r1)
+;   addi r1, r1, 0x10
+;   blr
+
+function %ushr_i32_c(i32) -> i32 {
+block0(v0: i32):
+    v1 = iconst.i32 7
+    v2 = ushr v0, v1
+    return v2
+}
+
+; VCode:
+;   mflr r0
+;   load_addr sp, -16(sp)
+;   std r0, 8(sp)
+;   std fp, 0(sp)
+;   mr fp, sp
+; block0:
+;   srwi r3, r3, 7
+;   ld r0, 8(sp)
+;   mtlr r0
+;   ld fp, 0(sp)
+;   load_addr sp, 16(sp)
+;   blr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   mflr r0
+;   addi r1, r1, -0x10
+;   std r0, 8(r1)
+;   std r31, 0(r1)
+;   ori r31, r1, 0
+; block1: ; offset 0x14
+;   srwi r3, r3, 7
+;   ld r0, 8(r1)
+;   mtlr r0
+;   ld r31, 0(r1)
+;   addi r1, r1, 0x10
+;   blr
+
+function %sshr_i32_c(i32) -> i32 {
+block0(v0: i32):
+    v1 = iconst.i32 7
+    v2 = sshr v0, v1
+    return v2
+}
+
+; VCode:
+;   mflr r0
+;   load_addr sp, -16(sp)
+;   std r0, 8(sp)
+;   std fp, 0(sp)
+;   mr fp, sp
+; block0:
+;   srawi r3, r3, 7
+;   ld r0, 8(sp)
+;   mtlr r0
+;   ld fp, 0(sp)
+;   load_addr sp, 16(sp)
+;   blr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   mflr r0
+;   addi r1, r1, -0x10
+;   std r0, 8(r1)
+;   std r31, 0(r1)
+;   ori r31, r1, 0
+; block1: ; offset 0x14
+;   srawi r3, r3, 7
+;   ld r0, 8(r1)
+;   mtlr r0
+;   ld r31, 0(r1)
+;   addi r1, r1, 0x10
+;   blr
+
+function %rotl_i32_c(i32) -> i32 {
+block0(v0: i32):
+    v1 = iconst.i32 7
+    v2 = rotl v0, v1
+    return v2
+}
+
+; VCode:
+;   mflr r0
+;   load_addr sp, -16(sp)
+;   std r0, 8(sp)
+;   std fp, 0(sp)
+;   mr fp, sp
+; block0:
+;   rotlwi r3, r3, 7
+;   ld r0, 8(sp)
+;   mtlr r0
+;   ld fp, 0(sp)
+;   load_addr sp, 16(sp)
+;   blr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   mflr r0
+;   addi r1, r1, -0x10
+;   std r0, 8(r1)
+;   std r31, 0(r1)
+;   ori r31, r1, 0
+; block1: ; offset 0x14
+;   rotlwi r3, r3, 7
+;   ld r0, 8(r1)
+;   mtlr r0
+;   ld r31, 0(r1)
+;   addi r1, r1, 0x10
+;   blr
+
+function %rotr_i32_c(i32) -> i32 {
+block0(v0: i32):
+    v1 = iconst.i32 7
+    v2 = rotr v0, v1
+    return v2
+}
+
+; VCode:
+;   mflr r0
+;   load_addr sp, -16(sp)
+;   std r0, 8(sp)
+;   std fp, 0(sp)
+;   mr fp, sp
+; block0:
+;   rotlwi r3, r3, 25
+;   ld r0, 8(sp)
+;   mtlr r0
+;   ld fp, 0(sp)
+;   load_addr sp, 16(sp)
+;   blr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   mflr r0
+;   addi r1, r1, -0x10
+;   std r0, 8(r1)
+;   std r31, 0(r1)
+;   ori r31, r1, 0
+; block1: ; offset 0x14
+;   rotlwi r3, r3, 0x19
+;   ld r0, 8(r1)
+;   mtlr r0
+;   ld r31, 0(r1)
+;   addi r1, r1, 0x10
+;   blr
+
+function %shl_zero(i64) -> i64 {
+block0(v0: i64):
+    v1 = iconst.i64 0
+    v2 = ishl v0, v1
+    return v2
+}
+
+; VCode:
+;   mflr r0
+;   load_addr sp, -16(sp)
+;   std r0, 8(sp)
+;   std fp, 0(sp)
+;   mr fp, sp
+; block0:
+;   sldi r3, r3, 0
+;   ld r0, 8(sp)
+;   mtlr r0
+;   ld fp, 0(sp)
+;   load_addr sp, 16(sp)
+;   blr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   mflr r0
+;   addi r1, r1, -0x10
+;   std r0, 8(r1)
+;   std r31, 0(r1)
+;   ori r31, r1, 0
+; block1: ; offset 0x14
+;   sldi r3, r3, 0
+;   ld r0, 8(r1)
+;   mtlr r0
+;   ld r31, 0(r1)
+;   addi r1, r1, 0x10
+;   blr
+
+function %shl_wrap(i64) -> i64 {
+block0(v0: i64):
+    v1 = iconst.i64 65
+    v2 = ishl v0, v1
+    return v2
+}
+
+; VCode:
+;   mflr r0
+;   load_addr sp, -16(sp)
+;   std r0, 8(sp)
+;   std fp, 0(sp)
+;   mr fp, sp
+; block0:
+;   sldi r3, r3, 1
+;   ld r0, 8(sp)
+;   mtlr r0
+;   ld fp, 0(sp)
+;   load_addr sp, 16(sp)
+;   blr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   mflr r0
+;   addi r1, r1, -0x10
+;   std r0, 8(r1)
+;   std r31, 0(r1)
+;   ori r31, r1, 0
+; block1: ; offset 0x14
+;   sldi r3, r3, 1
 ;   ld r0, 8(r1)
 ;   mtlr r0
 ;   ld r31, 0(r1)

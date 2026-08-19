@@ -486,6 +486,30 @@ impl MachInstEmit for Inst {
                 sink.put4(word);
             }
 
+            &Inst::ShiftRRImm { op, rd, ra, imm } => {
+                let rd = reg_num(rd.to_reg());
+                let ra_n = reg_num(ra);
+                let n = u32::from(imm);
+                let word = match op {
+                    // sldi rd, ra, n == rldicr rd, ra, n, 63-n
+                    ShiftOp::Sld => enc_md(ra_n, rd, n, 63 - n, 1),
+                    // srdi rd, ra, n == rldicl rd, ra, 64-n, n. For n = 0
+                    // the rotate wraps to 0, which leaves the value alone.
+                    ShiftOp::Srd => enc_md(ra_n, rd, (64 - n) & 63, n, 0),
+                    ShiftOp::Srad => enc_xs(ra_n, rd, n),
+                    // rotldi rd, ra, n == rldicl rd, ra, n, 0
+                    ShiftOp::Rotld => enc_md(ra_n, rd, n, 0, 0),
+                    // slwi rd, ra, n == rlwinm rd, ra, n, 0, 31-n
+                    ShiftOp::Slw => enc_m(ra_n, rd, n, 0, 31 - n),
+                    // srwi rd, ra, n == rlwinm rd, ra, 32-n, n, 31
+                    ShiftOp::Srw => enc_m(ra_n, rd, (32 - n) & 31, n, 31),
+                    ShiftOp::Sraw => enc_x_logic(ra_n, rd, n, 824),
+                    // rotlwi rd, ra, n == rlwinm rd, ra, n, 0, 31
+                    ShiftOp::Rotlw => enc_m(ra_n, rd, n, 0, 31),
+                };
+                sink.put4(word);
+            }
+
             &Inst::ShiftRRR { op, rd, ra, rb } => {
                 let rd = reg_num(rd.to_reg());
                 let ra = reg_num(ra);

@@ -127,6 +127,10 @@ fn ppc64_get_operands(inst: &mut Inst, collector: &mut impl OperandVisitor) {
             collector.reg_use(&mut kind.rs1);
             collector.reg_use(&mut kind.rs2);
         }
+        Inst::ShiftRRImm { rd, ra, .. } => {
+            collector.reg_use(ra);
+            collector.reg_def(rd);
+        }
         Inst::ShiftRRR { rd, ra, rb, .. } => {
             collector.reg_use(ra);
             collector.reg_use(rb);
@@ -568,6 +572,19 @@ impl Inst {
                     UnaryOp::Not => "not",
                 };
                 format!("{mnemonic} {}, {}", wreg(*rd), reg(*rn))
+            }
+            Inst::ShiftRRImm { op, rd, ra, imm } => {
+                let mnemonic = match op {
+                    ShiftOp::Slw => "slwi",
+                    ShiftOp::Srw => "srwi",
+                    ShiftOp::Sraw => "srawi",
+                    ShiftOp::Sld => "sldi",
+                    ShiftOp::Srd => "srdi",
+                    ShiftOp::Srad => "sradi",
+                    ShiftOp::Rotlw => "rotlwi",
+                    ShiftOp::Rotld => "rotldi",
+                };
+                format!("{mnemonic} {}, {}, {imm}", wreg(*rd), reg(*ra))
             }
             Inst::ShiftRRR { op, rd, ra, rb } => {
                 let mnemonic = match op {

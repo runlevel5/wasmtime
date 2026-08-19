@@ -102,6 +102,20 @@ pub(crate) fn enc_md(rs: u32, ra: u32, sh: u32, m: u32, xo3: u32) -> u32 {
         | ((sh >> 5) << 1)
 }
 
+/// M-form `rlwinm`: `21 | RS | RA | SH | MB | ME | Rc=0`. The word
+/// rotate-and-mask instruction, which supplies the shift-by-immediate
+/// forms for 32-bit shifts.
+pub(crate) fn enc_m(rs: u32, ra: u32, sh: u32, mb: u32, me: u32) -> u32 {
+    debug_assert!(sh < 32 && mb < 32 && me < 32);
+    (21 << 26) | (rs << 21) | (ra << 16) | (sh << 11) | (mb << 6) | (me << 1)
+}
+
+/// XS-form `sradi`: `31 | RS | RA | sh[0:4] | XO9 | sh[5] | Rc=0`.
+pub(crate) fn enc_xs(rs: u32, ra: u32, sh: u32) -> u32 {
+    debug_assert!(sh < 64);
+    (31 << 26) | (rs << 21) | (ra << 16) | ((sh & 0x1F) << 11) | (413 << 2) | ((sh >> 5) << 1)
+}
+
 /// Compare, X-form: `31 | BF | 0 | L | RA | RB | XO10 | 0`.
 /// `xo` is 0 for cmp (signed), 32 for cmpl (logical); `l` selects 64-bit.
 pub(crate) fn enc_cmp(bf: u32, l: u32, ra: u32, rb: u32, xo: u32) -> u32 {
@@ -206,6 +220,15 @@ mod tests {
         assert_eq!(enc_d(14, 3, 0, 1), 0x3860_0001); // li r3, 1
         assert_eq!(enc_d(15, 4, 0, 0x1234), 0x3C80_1234); // lis r4, 0x1234
         assert_eq!(enc_d_logic(24, 0, 0, 0), NOP_INSTRUCTION); // nop
+        // Shift-by-immediate forms, all verified against llvm-mc.
+        assert_eq!(enc_md(4, 3, 7, 56, 1), 0x7883_3E24); // sldi r3, r4, 7
+        assert_eq!(enc_md(4, 3, 57, 7, 0), 0x7883_C9C2); // srdi r3, r4, 7
+        assert_eq!(enc_md(4, 3, 7, 0, 0), 0x7883_3800); // rotldi r3, r4, 7
+        assert_eq!(enc_xs(4, 3, 7), 0x7C83_3E74); // sradi r3, r4, 7
+        assert_eq!(enc_m(4, 3, 7, 0, 24), 0x5483_3830); // slwi r3, r4, 7
+        assert_eq!(enc_m(4, 3, 25, 7, 31), 0x5483_C9FE); // srwi r3, r4, 7
+        assert_eq!(enc_m(4, 3, 7, 0, 31), 0x5483_383E); // rotlwi r3, r4, 7
+        assert_eq!(enc_x_logic(4, 3, 7, 824), 0x7C83_3E70); // srawi r3, r4, 7
         assert_eq!(enc_xo(3, 4, 5, 266), 0x7C64_2A14); // add r3, r4, r5
         assert_eq!(enc_xo(3, 4, 5, 40), 0x7C64_2850); // subf r3, r4, r5
         assert_eq!(enc_xo(3, 4, 5, 10), 0x7C64_2814); // addc r3, r4, r5

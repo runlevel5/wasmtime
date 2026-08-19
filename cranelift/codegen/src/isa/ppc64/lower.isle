@@ -128,6 +128,23 @@
                (gen_extend (put_in_reg x) true (ty_bits ty) 64)
                (mask_shift_amount y ty))))
 
+;; A constant shift amount uses the rotate-and-mask immediate forms,
+;; saving the `li` that materializing the amount into a register would
+;; need. wasm only has 32- and 64-bit shifts, so the narrower types keep
+;; to the register path.
+(rule 5 (lower (ishl $I64 x (iconst _ (u64_from_imm64 n))))
+  (output_reg (gen_shift_imm (ShiftOp.Sld) (put_in_reg x) (shift_imm n $I64))))
+(rule 5 (lower (ishl $I32 x (iconst _ (u64_from_imm64 n))))
+  (output_reg (gen_shift_imm (ShiftOp.Slw) (put_in_reg x) (shift_imm n $I32))))
+(rule 5 (lower (ushr $I64 x (iconst _ (u64_from_imm64 n))))
+  (output_reg (gen_shift_imm (ShiftOp.Srd) (put_in_reg x) (shift_imm n $I64))))
+(rule 5 (lower (ushr $I32 x (iconst _ (u64_from_imm64 n))))
+  (output_reg (gen_shift_imm (ShiftOp.Srw) (put_in_reg x) (shift_imm n $I32))))
+(rule 5 (lower (sshr $I64 x (iconst _ (u64_from_imm64 n))))
+  (output_reg (gen_shift_imm (ShiftOp.Srad) (put_in_reg x) (shift_imm n $I64))))
+(rule 5 (lower (sshr $I32 x (iconst _ (u64_from_imm64 n))))
+  (output_reg (gen_shift_imm (ShiftOp.Sraw) (put_in_reg x) (shift_imm n $I32))))
+
 ;;;; Rules for `rotl` / `rotr` ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ;; The rotate instructions mask the amount to the width themselves, and a
@@ -171,6 +188,17 @@
 
 (rule 1 (lower (rotr (fits_in_16 ty) x y))
   (output_reg (narrow_rot false x y ty)))
+
+(rule 5 (lower (rotl $I64 x (iconst _ (u64_from_imm64 n))))
+  (output_reg (gen_shift_imm (ShiftOp.Rotld) (put_in_reg x) (shift_imm n $I64))))
+(rule 5 (lower (rotl $I32 x (iconst _ (u64_from_imm64 n))))
+  (output_reg (gen_shift_imm (ShiftOp.Rotlw) (put_in_reg x) (shift_imm n $I32))))
+
+;; A right rotate by n is a left rotate by (width - n) mod width.
+(rule 5 (lower (rotr $I64 x (iconst _ (u64_from_imm64 n))))
+  (output_reg (gen_shift_imm (ShiftOp.Rotld) (put_in_reg x) (rot_imm_neg n $I64))))
+(rule 5 (lower (rotr $I32 x (iconst _ (u64_from_imm64 n))))
+  (output_reg (gen_shift_imm (ShiftOp.Rotlw) (put_in_reg x) (rot_imm_neg n $I32))))
 
 ;;;; Rules for bit counting ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 

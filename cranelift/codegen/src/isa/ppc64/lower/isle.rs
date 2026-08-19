@@ -222,6 +222,15 @@ impl generated_code::Context for Ppc64IsleContext<'_, '_, MInst, Ppc64Backend> {
         i16::try_from(i64::from(imm)).ok().map(|i| i as u16)
     }
 
+    fn shift_imm(&mut self, n: u64, ty: Type) -> u8 {
+        (n & u64::from(ty.bits() - 1)) as u8
+    }
+
+    fn rot_imm_neg(&mut self, n: u64, ty: Type) -> u8 {
+        let bits = u64::from(ty.bits());
+        ((bits - (n & (bits - 1))) & (bits - 1)) as u8
+    }
+
     fn shift_mask_u16(&mut self, ty: Type) -> u16 {
         u16::try_from(ty.bits() - 1).unwrap()
     }
