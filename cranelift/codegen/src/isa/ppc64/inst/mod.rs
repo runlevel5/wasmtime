@@ -30,7 +30,7 @@ use crate::isa::ppc64::abi::Ppc64MachineDeps;
 
 pub use crate::isa::ppc64::lower::isle::generated_code::{
     AluImmOp, AluOp, BitOp, DivOp, FpuOp1, FpuOp2, FpuRoundMode, LoadOP, MInst as Inst, ShiftOp,
-    StoreOP, VecAluOp,
+    StoreOP, VecAluOp, VecFpuOp1, VecFpuOp2,
     UnaryOp,
 };
 
@@ -198,6 +198,15 @@ fn ppc64_get_operands(inst: &mut Inst, collector: &mut impl OperandVisitor) {
         Inst::VecAluRRR { rd, ra, rb, .. } => {
             collector.reg_use(ra);
             collector.reg_use(rb);
+            collector.reg_def(rd);
+        }
+        Inst::VecFpuRRR { rd, ra, rb, .. } => {
+            collector.reg_use(ra);
+            collector.reg_use(rb);
+            collector.reg_def(rd);
+        }
+        Inst::VecFpuRR { rd, rn, .. } => {
+            collector.reg_use(rn);
             collector.reg_def(rd);
         }
         Inst::VecZero { rd } => {
@@ -950,21 +959,57 @@ impl Inst {
                 let mnemonic = match op {
                     VecAluOp::Add => "vadd",
                     VecAluOp::Sub => "vsub",
+                    VecAluOp::CmpEq => "vcmpeq",
+                    VecAluOp::CmpGtS => "vcmpgts",
+                    VecAluOp::CmpGtU => "vcmpgtu",
+                    VecAluOp::MinS => "vmins",
+                    VecAluOp::MinU => "vminu",
+                    VecAluOp::MaxS => "vmaxs",
+                    VecAluOp::MaxU => "vmaxu",
+                    VecAluOp::Shl => "vsl",
+                    VecAluOp::ShrU => "vsr",
+                    VecAluOp::ShrS => "vsra",
                     VecAluOp::And => "xxland",
                     VecAluOp::Or => "xxlor",
                     VecAluOp::Xor => "xxlxor",
                     VecAluOp::Nor => "xxlnor",
                 };
                 match op {
-                    VecAluOp::Add | VecAluOp::Sub => format!(
+                    VecAluOp::And | VecAluOp::Or | VecAluOp::Xor | VecAluOp::Nor => {
+                        format!("{mnemonic} {}, {}, {}", wreg(*rd), reg(*ra), reg(*rb))
+                    }
+                    _ => format!(
                         "{mnemonic}{} {}, {}, {}",
                         ty.lane_bits(),
                         wreg(*rd),
                         reg(*ra),
                         reg(*rb)
                     ),
-                    _ => format!("{mnemonic} {}, {}, {}", wreg(*rd), reg(*ra), reg(*rb)),
                 }
+            }
+            Inst::VecFpuRRR { op, rd, ra, rb, ty } => {
+                let mnemonic = match op {
+                    VecFpuOp2::Add => "xvadd",
+                    VecFpuOp2::Sub => "xvsub",
+                    VecFpuOp2::Mul => "xvmul",
+                    VecFpuOp2::Div => "xvdiv",
+                };
+                let sfx = if ty.lane_bits() == 32 { "sp" } else { "dp" };
+                format!(
+                    "{mnemonic}{sfx} {}, {}, {}",
+                    wreg(*rd),
+                    reg(*ra),
+                    reg(*rb)
+                )
+            }
+            Inst::VecFpuRR { op, rd, rn, ty } => {
+                let mnemonic = match op {
+                    VecFpuOp1::Sqrt => "xvsqrt",
+                    VecFpuOp1::Neg => "xvneg",
+                    VecFpuOp1::Abs => "xvabs",
+                };
+                let sfx = if ty.lane_bits() == 32 { "sp" } else { "dp" };
+                format!("{mnemonic}{sfx} {}, {}", wreg(*rd), reg(*rn))
             }
             Inst::VecZero { rd } => format!("vec_zero {}", wreg(*rd)),
             Inst::MovToVec { rd, rn } => format!("mtvsrd {}, {}", wreg(*rd), reg(*rn)),

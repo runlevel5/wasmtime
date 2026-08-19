@@ -136,6 +136,39 @@ fn emit_mem_access(
     }
 }
 
+/// The VX-form extended opcode for a lane-width-dispatched vector ALU
+/// operation. The doubleword compares sit one above their b/h/w
+/// siblings' stride rather than continuing it, hence the explicit
+/// table rather than arithmetic.
+fn vx_xo(op: VecAluOp, ty: Type) -> u32 {
+    let lane = ty.lane_bits();
+    let idx = match lane {
+        8 => 0,
+        16 => 1,
+        32 => 2,
+        64 => 3,
+        _ => unreachable!("vector lane width {ty}"),
+    };
+    let table: [u32; 4] = match op {
+        VecAluOp::Add => [0, 64, 128, 192],
+        VecAluOp::Sub => [1024, 1088, 1152, 1216],
+        VecAluOp::CmpEq => [6, 70, 134, 199],
+        VecAluOp::CmpGtS => [774, 838, 902, 967],
+        VecAluOp::CmpGtU => [518, 582, 646, 711],
+        VecAluOp::MinS => [770, 834, 898, 962],
+        VecAluOp::MinU => [514, 578, 642, 706],
+        VecAluOp::MaxS => [258, 322, 386, 450],
+        VecAluOp::MaxU => [2, 66, 130, 194],
+        VecAluOp::Shl => [260, 324, 388, 1476],
+        VecAluOp::ShrU => [516, 580, 644, 1732],
+        VecAluOp::ShrS => [772, 836, 900, 964],
+        VecAluOp::And | VecAluOp::Or | VecAluOp::Xor | VecAluOp::Nor => {
+            unreachable!("{op:?} is emitted as a VSX logical, not a VX form")
+        }
+    };
+    table[idx]
+}
+
 /// Resolve an `AMode` for the X-form-only vector accesses: returns the
 /// `(RA, RB)` fields, materializing the offset into r0 when non-zero.
 /// With a zero offset the base goes in RB and RA is the literal zero,
@@ -1569,22 +1602,46 @@ impl MachInstEmit for Inst {
                     VecAluOp::Or => enc_xx3(d, a, b, 146),
                     VecAluOp::Xor => enc_xx3(d, a, b, 154),
                     VecAluOp::Nor => enc_xx3(d, a, b, 162),
-                    VecAluOp::Add | VecAluOp::Sub => {
+                    _ => {
                         // VMX forms, VR numbers only.
                         let (d, a, b) = (d - 32, a - 32, b - 32);
-                        let base = if op == VecAluOp::Add { 0 } else { 1024 };
-                        let xo = base
-                            + match ty.lane_bits() {
-                                8 => 0,
-                                16 => 64,
-                                32 => 128,
-                                64 => 192,
-                                _ => unreachable!("vector lane width {ty}"),
-                            };
-                        enc_vx(d, a, b, xo)
+                        enc_vx(d, a, b, vx_xo(op, ty))
                     }
                 };
                 sink.put4(word);
+            }
+
+            &Inst::VecFpuRRR { op, rd, ra, rb, ty } => {
+                let single = ty.lane_bits() == 32;
+                let xo = match (op, single) {
+                    (VecFpuOp2::Add, true) => 64,
+                    (VecFpuOp2::Add, false) => 96,
+                    (VecFpuOp2::Sub, true) => 72,
+                    (VecFpuOp2::Sub, false) => 104,
+                    (VecFpuOp2::Mul, true) => 80,
+                    (VecFpuOp2::Mul, false) => 112,
+                    (VecFpuOp2::Div, true) => 88,
+                    (VecFpuOp2::Div, false) => 120,
+                };
+                sink.put4(enc_xx3(
+                    vsr_num(rd.to_reg()),
+                    vsr_num(ra),
+                    vsr_num(rb),
+                    xo,
+                ));
+            }
+
+            &Inst::VecFpuRR { op, rd, rn, ty } => {
+                let single = ty.lane_bits() == 32;
+                let xo = match (op, single) {
+                    (VecFpuOp1::Sqrt, true) => 139,
+                    (VecFpuOp1::Sqrt, false) => 203,
+                    (VecFpuOp1::Neg, true) => 441,
+                    (VecFpuOp1::Neg, false) => 505,
+                    (VecFpuOp1::Abs, true) => 409,
+                    (VecFpuOp1::Abs, false) => 473,
+                };
+                sink.put4(enc_xx2(vsr_num(rd.to_reg()), vsr_num(rn), xo));
             }
 
             &Inst::VecZero { rd } => {

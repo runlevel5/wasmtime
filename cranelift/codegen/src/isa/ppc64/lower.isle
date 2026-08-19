@@ -1476,3 +1476,90 @@
 
 (rule 2 (lower (bitcast (ty_vec128 _) _ x @ (value_type (ty_vec128 _))))
   (output_reg (put_in_reg x)))
+
+;;;; Vector comparisons ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; A CLIF vector `icmp` yields an all-ones lane for true and all-zeros
+;; for false, which is exactly what the hardware compares produce. Only
+;; equality and signed/unsigned greater-than exist as instructions, so
+;; the other six conditions come from swapping the operands (turning
+;; `>` into `<`) and complementing the mask (turning `<` into `>=`).
+
+(rule 3 (lower (icmp (ty_vec128 ty) (IntCC.Equal) x y))
+  (output_reg (vec_alu_rrr (VecAluOp.CmpEq) (put_in_reg x) (put_in_reg y) ty)))
+
+(rule 3 (lower (icmp (ty_vec128 ty) (IntCC.NotEqual) x y))
+  (output_reg
+    (vec_not (vec_alu_rrr (VecAluOp.CmpEq) (put_in_reg x) (put_in_reg y) ty) ty)))
+
+(rule 3 (lower (icmp (ty_vec128 ty) (IntCC.SignedGreaterThan) x y))
+  (output_reg (vec_alu_rrr (VecAluOp.CmpGtS) (put_in_reg x) (put_in_reg y) ty)))
+
+(rule 3 (lower (icmp (ty_vec128 ty) (IntCC.SignedLessThan) x y))
+  (output_reg (vec_alu_rrr (VecAluOp.CmpGtS) (put_in_reg y) (put_in_reg x) ty)))
+
+(rule 3 (lower (icmp (ty_vec128 ty) (IntCC.SignedGreaterThanOrEqual) x y))
+  (output_reg
+    (vec_not (vec_alu_rrr (VecAluOp.CmpGtS) (put_in_reg y) (put_in_reg x) ty) ty)))
+
+(rule 3 (lower (icmp (ty_vec128 ty) (IntCC.SignedLessThanOrEqual) x y))
+  (output_reg
+    (vec_not (vec_alu_rrr (VecAluOp.CmpGtS) (put_in_reg x) (put_in_reg y) ty) ty)))
+
+(rule 3 (lower (icmp (ty_vec128 ty) (IntCC.UnsignedGreaterThan) x y))
+  (output_reg (vec_alu_rrr (VecAluOp.CmpGtU) (put_in_reg x) (put_in_reg y) ty)))
+
+(rule 3 (lower (icmp (ty_vec128 ty) (IntCC.UnsignedLessThan) x y))
+  (output_reg (vec_alu_rrr (VecAluOp.CmpGtU) (put_in_reg y) (put_in_reg x) ty)))
+
+(rule 3 (lower (icmp (ty_vec128 ty) (IntCC.UnsignedGreaterThanOrEqual) x y))
+  (output_reg
+    (vec_not (vec_alu_rrr (VecAluOp.CmpGtU) (put_in_reg y) (put_in_reg x) ty) ty)))
+
+(rule 3 (lower (icmp (ty_vec128 ty) (IntCC.UnsignedLessThanOrEqual) x y))
+  (output_reg
+    (vec_not (vec_alu_rrr (VecAluOp.CmpGtU) (put_in_reg x) (put_in_reg y) ty) ty)))
+
+;;;; Vector integer min/max ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(rule 2 (lower (smin (ty_vec128 ty) x y))
+  (output_reg (vec_alu_rrr (VecAluOp.MinS) (put_in_reg x) (put_in_reg y) ty)))
+(rule 2 (lower (umin (ty_vec128 ty) x y))
+  (output_reg (vec_alu_rrr (VecAluOp.MinU) (put_in_reg x) (put_in_reg y) ty)))
+(rule 2 (lower (smax (ty_vec128 ty) x y))
+  (output_reg (vec_alu_rrr (VecAluOp.MaxS) (put_in_reg x) (put_in_reg y) ty)))
+(rule 2 (lower (umax (ty_vec128 ty) x y))
+  (output_reg (vec_alu_rrr (VecAluOp.MaxU) (put_in_reg x) (put_in_reg y) ty)))
+
+;;;; Vector shifts ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; CLIF supplies one scalar amount for the whole vector; the hardware
+;; wants it per lane, so it is splatted first. No masking: the hardware
+;; already uses only the low log2(lane width) bits of each element.
+
+(rule 6 (lower (ishl (ty_vec128 ty) x y))
+  (output_reg (vec_alu_rrr (VecAluOp.Shl) (put_in_reg x) (vec_shift_amount y ty) ty)))
+
+(rule 6 (lower (ushr (ty_vec128 ty) x y))
+  (output_reg (vec_alu_rrr (VecAluOp.ShrU) (put_in_reg x) (vec_shift_amount y ty) ty)))
+
+(rule 6 (lower (sshr (ty_vec128 ty) x y))
+  (output_reg (vec_alu_rrr (VecAluOp.ShrS) (put_in_reg x) (vec_shift_amount y ty) ty)))
+
+;;;; Floating-point lane arithmetic ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(rule 2 (lower (fadd (ty_vec128 ty) x y))
+  (output_reg (vec_fpu_rrr (VecFpuOp2.Add) (put_in_reg x) (put_in_reg y) ty)))
+(rule 2 (lower (fsub (ty_vec128 ty) x y))
+  (output_reg (vec_fpu_rrr (VecFpuOp2.Sub) (put_in_reg x) (put_in_reg y) ty)))
+(rule 2 (lower (fmul (ty_vec128 ty) x y))
+  (output_reg (vec_fpu_rrr (VecFpuOp2.Mul) (put_in_reg x) (put_in_reg y) ty)))
+(rule 2 (lower (fdiv (ty_vec128 ty) x y))
+  (output_reg (vec_fpu_rrr (VecFpuOp2.Div) (put_in_reg x) (put_in_reg y) ty)))
+
+(rule 2 (lower (sqrt (ty_vec128 ty) x))
+  (output_reg (vec_fpu_rr (VecFpuOp1.Sqrt) (put_in_reg x) ty)))
+(rule 2 (lower (fneg (ty_vec128 ty) x))
+  (output_reg (vec_fpu_rr (VecFpuOp1.Neg) (put_in_reg x) ty)))
+(rule 2 (lower (fabs (ty_vec128 ty) x))
+  (output_reg (vec_fpu_rr (VecFpuOp1.Abs) (put_in_reg x) ty)))

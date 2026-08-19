@@ -171,6 +171,17 @@ pub(crate) fn enc_xxpermdi(t6: u32, a6: u32, b6: u32, dm: u32) -> u32 {
         | (t6 >> 5)
 }
 
+/// XX2-form: `60 | T5 | 00000 | B5 | XO9 | BX | TX`.
+pub(crate) fn enc_xx2(t6: u32, b6: u32, xo: u32) -> u32 {
+    debug_assert!(t6 < 64 && b6 < 64 && xo < 512);
+    (60 << 26)
+        | ((t6 & 31) << 21)
+        | ((b6 & 31) << 11)
+        | (xo << 2)
+        | ((b6 >> 5) << 1)
+        | (t6 >> 5)
+}
+
 /// `xxspltw`: XX2-form: `60 | T5 | 00 UIM | B5 | XO9=164 | BX | TX`.
 pub(crate) fn enc_xxspltw(t6: u32, b6: u32, uim: u32) -> u32 {
     debug_assert!(t6 < 64 && b6 < 64 && uim < 4);
@@ -316,6 +327,32 @@ mod tests {
         assert_eq!(enc_mxvsrd(34, 5, 179), 0x7C45_0167); // mtvsrd vs34, r5
         assert_eq!(enc_mxvsrd(34, 5, 51), 0x7C45_0067); // mfvsrd r5, vs34
         assert_eq!(enc_xxspltw(34, 35, 1), 0xF041_1A93); // xxspltw vs34, vs35, 1
+        // Vector compares, min/max, shifts and float lane ops; all
+        // verified against llvm-mc (-mcpu=pwr8).
+        assert_eq!(enc_vx(2, 3, 4, 6), 0x1043_2006); // vcmpequb
+        assert_eq!(enc_vx(2, 3, 4, 199), 0x1043_20C7); // vcmpequd
+        assert_eq!(enc_vx(2, 3, 4, 774), 0x1043_2306); // vcmpgtsb
+        assert_eq!(enc_vx(2, 3, 4, 967), 0x1043_23C7); // vcmpgtsd
+        assert_eq!(enc_vx(2, 3, 4, 518), 0x1043_2206); // vcmpgtub
+        assert_eq!(enc_vx(2, 3, 4, 711), 0x1043_22C7); // vcmpgtud
+        assert_eq!(enc_vx(2, 3, 4, 770), 0x1043_2302); // vminsb
+        assert_eq!(enc_vx(2, 3, 4, 514), 0x1043_2202); // vminub
+        assert_eq!(enc_vx(2, 3, 4, 258), 0x1043_2102); // vmaxsb
+        assert_eq!(enc_vx(2, 3, 4, 194), 0x1043_20C2); // vmaxud
+        assert_eq!(enc_vx(2, 3, 4, 260), 0x1043_2104); // vslb
+        assert_eq!(enc_vx(2, 3, 4, 1476), 0x1043_25C4); // vsld
+        assert_eq!(enc_vx(2, 3, 4, 1732), 0x1043_26C4); // vsrd
+        assert_eq!(enc_vx(2, 3, 4, 964), 0x1043_23C4); // vsrad
+        assert_eq!(enc_xx3(34, 35, 36, 64), 0xF043_2207); // xvaddsp
+        assert_eq!(enc_xx3(34, 35, 36, 96), 0xF043_2307); // xvadddp
+        assert_eq!(enc_xx3(34, 35, 36, 88), 0xF043_22C7); // xvdivsp
+        assert_eq!(enc_xx3(34, 35, 36, 120), 0xF043_23C7); // xvdivdp
+        assert_eq!(enc_xx2(34, 35, 139), 0xF040_1A2F); // xvsqrtsp
+        assert_eq!(enc_xx2(34, 35, 203), 0xF040_1B2F); // xvsqrtdp
+        assert_eq!(enc_xx2(34, 35, 441), 0xF040_1EE7); // xvnegsp
+        assert_eq!(enc_xx2(34, 35, 505), 0xF040_1FE7); // xvnegdp
+        assert_eq!(enc_xx2(34, 35, 409), 0xF040_1E67); // xvabssp
+        assert_eq!(enc_xx2(34, 35, 473), 0xF040_1F67); // xvabsdp
         // Shift-by-immediate forms, all verified against llvm-mc.
         assert_eq!(enc_md(4, 3, 7, 56, 1), 0x7883_3E24); // sldi r3, r4, 7
         assert_eq!(enc_md(4, 3, 57, 7, 0), 0x7883_C9C2); // srdi r3, r4, 7

@@ -142,6 +142,41 @@
     (Or)
     (Xor)
     (Nor)
+    ;; Lane comparisons, producing an all-ones or all-zeros mask per
+    ;; lane, which is exactly CLIF's vector `icmp` result. Only equality
+    ;; and greater-than exist in hardware; the lowering rules get the
+    ;; other six conditions by swapping operands and/or complementing.
+    (CmpEq)
+    (CmpGtS)
+    (CmpGtU)
+    (MinS)
+    (MinU)
+    (MaxS)
+    (MaxU)
+    ;; Per-lane shifts. The hardware uses only the low log2(lane width)
+    ;; bits of each element of the amount, which matches CLIF's rule
+    ;; that the amount is masked to the lane width, so the lowering
+    ;; rules splat the scalar amount without masking it.
+    (Shl)
+    (ShrU)
+    (ShrS)
+))
+
+;; Floating-point lane arithmetic; the lane type selects between the
+;; single- and double-precision forms.
+(type VecFpuOp2
+  (enum
+    (Add)
+    (Sub)
+    (Mul)
+    (Div)
+))
+
+(type VecFpuOp1
+  (enum
+    (Sqrt)
+    (Neg)
+    (Abs)
 ))
 
 ;; Floating-point round-to-integral. Ceil/floor/trunc map to
@@ -315,6 +350,20 @@
       (rd WritableReg)
       (ra Reg)
       (rb Reg)
+      (ty Type))
+
+    ;; Floating-point lane arithmetic.
+    (VecFpuRRR
+      (op VecFpuOp2)
+      (rd WritableReg)
+      (ra Reg)
+      (rb Reg)
+      (ty Type))
+
+    (VecFpuRR
+      (op VecFpuOp1)
+      (rd WritableReg)
+      (rn Reg)
       (ty Type))
 
     ;; Materialize the all-zeros vector (`xxlxor rd, rd, rd`).
@@ -865,6 +914,28 @@
   (let ((dst WritableReg (temp_writable_reg $I8X16))
         (_ Unit (emit (MInst.VecAluRRR op dst a b ty))))
     dst))
+
+(decl vec_fpu_rrr (VecFpuOp2 Reg Reg Type) Reg)
+(rule (vec_fpu_rrr op a b ty)
+  (let ((dst WritableReg (temp_writable_reg $I8X16))
+        (_ Unit (emit (MInst.VecFpuRRR op dst a b ty))))
+    dst))
+
+(decl vec_fpu_rr (VecFpuOp1 Reg Type) Reg)
+(rule (vec_fpu_rr op rn ty)
+  (let ((dst WritableReg (temp_writable_reg $I8X16))
+        (_ Unit (emit (MInst.VecFpuRR op dst rn ty))))
+    dst))
+
+;; Complement every lane: `vnor rd, x, x`.
+(decl vec_not (Reg Type) Reg)
+(rule (vec_not x ty) (vec_alu_rrr (VecAluOp.Nor) x x ty))
+
+;; Splat a scalar shift amount across the lanes of `ty`. The amount is
+;; left unmasked: see `VecAluOp.Shl`.
+(decl vec_shift_amount (Value Type) Reg)
+(rule (vec_shift_amount amt ty)
+  (vec_splat_lane (mov_to_vec (put_in_reg amt)) ty))
 
 (decl gen_vec_load (AMode MemFlagsData) Reg)
 (rule (gen_vec_load mem flags)
