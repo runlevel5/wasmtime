@@ -3,6 +3,7 @@ test run
 set enable_llvm_abi_extensions
 set enable_multi_ret_implicit_sret
 target x86_64 has_cmpxchg16b
+target powerpc64le
 
 function %atomic_load(i128) -> i128 {
     ss0 = explicit_slot 16

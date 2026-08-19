@@ -209,6 +209,9 @@
                   $I64)))
 
 ;; `-(64 - bits)` as a 16-bit immediate, for the `addi` above.
+(decl cls_adjust (Type) u16)
+(extern constructor cls_adjust cls_adjust)
+
 (decl clz_narrow_adjust (Type) u16)
 (extern constructor clz_narrow_adjust clz_narrow_adjust)
 
@@ -1211,3 +1214,160 @@
         (yr ValueRegs (put_in_regs y)))
     (output (value_regs (bitselect64 (lo mr) (lo xr) (lo yr))
                         (bitselect64 (hi mr) (hi xr) (hi yr))))))
+
+;;;; Rules for `cls` ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; XORing a value with its own sign-fill turns the leading sign bits
+;; (and the sign bit itself) into leading zeros, so a count of leading
+;; sign bits is `clz(x ^ (x >> 63)) - 1` on the sign-extended value,
+;; adjusted for the type's width.
+
+(rule (lower (cls (fits_in_64 (ty_int ty)) x))
+  (let ((s Reg (gen_extend (put_in_reg x) true (ty_bits ty) 64))
+        (u Reg (ppc_xor s (gen_shift (ShiftOp.Srad) s (imm $I64 63)))))
+    (output_reg (alu_rr_imm16 (AluImmOp.Addi)
+                              (gen_bitcount (BitOp.Clz) u $I64)
+                              (cls_adjust ty)))))
+
+(rule 1 (lower (cls $I128 x))
+  (let ((xr ValueRegs (put_in_regs x))
+        (sign Reg (gen_shift (ShiftOp.Srad) (hi xr) (imm $I64 63)))
+        (ulo Reg (ppc_xor (lo xr) sign))
+        (uhi Reg (ppc_xor (hi xr) sign))
+        (chi Reg (gen_bitcount (BitOp.Clz) uhi $I64))
+        (clo64 Reg (ppc_add (gen_bitcount (BitOp.Clz) ulo $I64) (imm $I64 64)))
+        (count Reg (gen_select (int_compare (IntCC.Equal) uhi (imm $I64 0) $I64)
+                               clo64 chi)))
+    ;; `count` here is a true 128-bit leading-zero count of the
+    ;; sign-XORed value, so the only correction is the sign bit itself.
+    (output (value_regs (alu_rr_imm16 (AluImmOp.Addi) count 0xffff)
+                        (imm $I64 0)))))
+
+;;;; Rules for `iabs` ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(rule (lower (iabs (fits_in_64 (ty_int ty)) x))
+  (let ((s Reg (gen_extend (put_in_reg x) true (ty_bits ty) 64)))
+    (output_reg (gen_select (int_compare (IntCC.SignedLessThan) s (imm $I64 0) $I64)
+                            (gen_unary (UnaryOp.Neg) s)
+                            s))))
+
+(rule 1 (lower (iabs $I128 x))
+  (let ((xr ValueRegs (put_in_regs x))
+        (zero Reg (imm $I64 0))
+        (nlo Reg (ppc_subfc zero (lo xr)))
+        (nhi Reg (ppc_subfe zero (hi xr)))
+        (kind IntegerCompare (int_compare (IntCC.SignedLessThan) (hi xr) zero $I64)))
+    (output (value_regs (gen_select kind nlo (lo xr))
+                        (gen_select kind nhi (hi xr))))))
+
+;;;; Rules for `bswap` ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(rule (lower (bswap $I16 x)) (output_reg (gen_bswap $I16 (put_in_reg x))))
+(rule (lower (bswap $I32 x)) (output_reg (gen_bswap $I32 (put_in_reg x))))
+(rule (lower (bswap $I64 x)) (output_reg (gen_bswap $I64 (put_in_reg x))))
+
+;; Byte-reversing 128 bits swaps the two doublewords as well as the
+;; bytes within each.
+(rule (lower (bswap $I128 x))
+  (let ((xr ValueRegs (put_in_regs x)))
+    (output (value_regs (gen_bswap $I64 (hi xr))
+                        (gen_bswap $I64 (lo xr))))))
+
+;;;; Rules for `bitrev` ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; Reverse the bytes with the `bswap` sequence, then reverse the bits
+;; inside each byte with three swap-and-merge rounds. For narrow types
+;; the wanted bits end up at the top of the register, so a single
+;; shift finishes the job (whatever garbage the upper input bits held
+;; is shifted out).
+
+(decl bitrev64 (Reg) Reg)
+(rule (bitrev64 x)
+  (let ((b Reg (gen_bswap $I64 x))
+        (m4 Reg (imm $I64 0x0f0f0f0f0f0f0f0f))
+        (t4 Reg (ppc_or (gen_shift (ShiftOp.Sld) (ppc_and b m4) (imm $I64 4))
+                        (ppc_and (gen_shift (ShiftOp.Srd) b (imm $I64 4)) m4)))
+        (m2 Reg (imm $I64 0x3333333333333333))
+        (t2 Reg (ppc_or (gen_shift (ShiftOp.Sld) (ppc_and t4 m2) (imm $I64 2))
+                        (ppc_and (gen_shift (ShiftOp.Srd) t4 (imm $I64 2)) m2)))
+        (m1 Reg (imm $I64 0x5555555555555555)))
+    (ppc_or (gen_shift (ShiftOp.Sld) (ppc_and t2 m1) (imm $I64 1))
+            (ppc_and (gen_shift (ShiftOp.Srd) t2 (imm $I64 1)) m1))))
+
+(rule (lower (bitrev $I8 x))
+  (output_reg (gen_shift (ShiftOp.Srd) (bitrev64 (put_in_reg x)) (imm $I64 56))))
+(rule (lower (bitrev $I16 x))
+  (output_reg (gen_shift (ShiftOp.Srd) (bitrev64 (put_in_reg x)) (imm $I64 48))))
+(rule (lower (bitrev $I32 x))
+  (output_reg (gen_shift (ShiftOp.Srd) (bitrev64 (put_in_reg x)) (imm $I64 32))))
+(rule (lower (bitrev $I64 x))
+  (output_reg (bitrev64 (put_in_reg x))))
+
+(rule (lower (bitrev $I128 x))
+  (let ((xr ValueRegs (put_in_regs x)))
+    (output (value_regs (bitrev64 (hi xr))
+                        (bitrev64 (lo xr))))))
+
+;;;; `bmask` with an `i128` on either side ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(decl bmask64 (Reg) Reg)
+(rule (bmask64 c)
+  (gen_select (int_compare (IntCC.NotEqual) c (imm $I64 0) $I64)
+              (imm $I64 0xffffffffffffffff)
+              (imm $I64 0)))
+
+(rule 1 (lower (bmask (fits_in_64 (ty_int _)) val @ (value_type $I128)))
+  (let ((vr ValueRegs (put_in_regs val)))
+    (output_reg (bmask64 (ppc_or (lo vr) (hi vr))))))
+
+(rule 3 (lower (bmask $I128 val @ (value_type (fits_in_64 in_ty))))
+  (let ((m Reg (bmask64 (put_in_cmp_reg val (IntCC.NotEqual) in_ty))))
+    (output (value_regs m m))))
+
+(rule 2 (lower (bmask $I128 val @ (value_type $I128)))
+  (let ((vr ValueRegs (put_in_regs val))
+        (m Reg (bmask64 (ppc_or (lo vr) (hi vr)))))
+    (output (value_regs m m))))
+
+;;;; Rules for `ceil`/`floor`/`trunc`/`nearest` ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; All four operate on the double held in the FPR; an `f32` input
+;; rounds to an integer that is exactly representable in `f32` (values
+;; of magnitude 2^24 and above are already integral), so no re-round
+;; to single is needed.
+
+(rule (lower (ceil (ty_scalar_float _) x))
+  (output_reg (fpu_round (FpuRoundMode.Ceil) (put_in_reg x))))
+(rule (lower (floor (ty_scalar_float _) x))
+  (output_reg (fpu_round (FpuRoundMode.Floor) (put_in_reg x))))
+(rule (lower (trunc (ty_scalar_float _) x))
+  (output_reg (fpu_round (FpuRoundMode.Trunc) (put_in_reg x))))
+(rule (lower (nearest (ty_scalar_float _) x))
+  (output_reg (fpu_round (FpuRoundMode.Nearest) (put_in_reg x))))
+
+;;;; 128-bit atomics ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; All four go through `lqarx`/`stqcx.` pseudo-loops with pinned
+;; registers; see the instruction definitions. Note that a CLIF atomic
+;; access requires natural (16-byte) alignment, which is also what the
+;; reservation instructions require.
+
+(rule 1 (lower (atomic_load $I128 (little_or_native_endian _flags) p))
+  (output (gen_atomic_load128 (put_in_reg p))))
+
+(rule 1 (lower (atomic_store (little_or_native_endian _flags)
+                             src @ (value_type $I128)
+                             p))
+  (let ((sr ValueRegs (put_in_regs src)))
+    (side_effect (gen_atomic_store128 (lo sr) (hi sr) (put_in_reg p)))))
+
+(rule 1 (lower (atomic_rmw $I128 (little_or_native_endian _flags) op p x))
+  (let ((xr ValueRegs (put_in_regs x)))
+    (output (gen_atomic_rmw128 op (put_in_reg p) (lo xr) (hi xr)))))
+
+(rule 1 (lower (atomic_cas $I128 (little_or_native_endian _flags) p e x))
+  (let ((er ValueRegs (put_in_regs e))
+        (xr ValueRegs (put_in_regs x)))
+    (output (gen_atomic_cas128 (put_in_reg p)
+                               (lo er) (hi er)
+                               (lo xr) (hi xr)))))

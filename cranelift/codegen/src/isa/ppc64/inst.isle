@@ -132,6 +132,19 @@
     (CvtFromSingleBits)
 ))
 
+;; Floating-point round-to-integral. Ceil/floor/trunc map to
+;; `frip`/`frim`/`friz`; `nearest` needs ties-to-even, which none of the
+;; `fri*` family provides (`frin` rounds ties away from zero), so it
+;; uses `xsrdpic`, rounding by the current FPSCR mode -- and Cranelift
+;; code always runs with the default round-to-nearest-even.
+(type FpuRoundMode
+  (enum
+    (Floor)
+    (Ceil)
+    (Trunc)
+    (Nearest)
+))
+
 ;; Load opcodes; selected by type in `LoadOP::from_type`.
 (type LoadOP
   (enum
@@ -233,6 +246,21 @@
     ;; Floating-point unary operation.
     (FpuRR
       (op FpuOp1)
+      (rd WritableReg)
+      (rn Reg)
+      (ty Type))
+
+    ;; Round to an integral value in floating-point.
+    (FpuRound
+      (rd WritableReg)
+      (rn Reg)
+      (mode FpuRoundMode))
+
+    ;; Byte-reverse the low `ty` bits: store to the ELFv2 red zone
+    ;; (the 288 bytes below SP, which the Linux kernel leaves intact
+    ;; across signal delivery) and reload with a byte-reversed load.
+    ;; The address lives in r0.
+    (Bswap
       (rd WritableReg)
       (rn Reg)
       (ty Type))
@@ -413,7 +441,46 @@
       (ty Type))
 
     ;; A full memory barrier (`sync`).
-    (Fence)
+        ;; 128-bit atomic operations. Plain `lq`/`stq` raise alignment
+    ;; interrupts in little-endian mode before ISA 3.0, so every access
+    ;; goes through `lqarx`/`stqcx.`, whose register pairs must be
+    ;; even:odd with the even register holding the most-significant
+    ;; doubleword. All operands are pinned to distinct registers by the
+    ;; operand collector (mirroring the aarch64 CAS loop): the address
+    ;; in r3, sources in r4:r5 (and a CAS replacement in r6:r7), the
+    ;; loaded old value in r8:r9, and the computed store pair in
+    ;; r10:r11 (r11 is the spill temp, always free).
+    (AtomicLoad128
+      (rd_lo WritableReg)
+      (rd_hi WritableReg)
+      (addr Reg))
+
+    (AtomicStore128
+      (rs_lo Reg)
+      (rs_hi Reg)
+      (tmp_lo WritableReg)
+      (tmp_hi WritableReg)
+      (addr Reg))
+
+    (AtomicRmw128
+      (op AtomicRmwOp)
+      (rd_lo WritableReg)
+      (rd_hi WritableReg)
+      (tmp_hi WritableReg)
+      (addr Reg)
+      (src_lo Reg)
+      (src_hi Reg))
+
+    (AtomicCas128
+      (rd_lo WritableReg)
+      (rd_hi WritableReg)
+      (addr Reg)
+      (exp_lo Reg)
+      (exp_hi Reg)
+      (new_lo Reg)
+      (new_hi Reg))
+
+(Fence)
 
     ;; A direct tail call: tear the frame down and branch (`b`, not
     ;; `bl`) with LR already restored to the original return address.
@@ -681,6 +748,18 @@
               signed
               out_ty))
 
+(decl fpu_round (FpuRoundMode Reg) Reg)
+(rule (fpu_round mode rn)
+  (let ((dst WritableReg (temp_writable_reg $F64))
+        (_ Unit (emit (MInst.FpuRound dst rn mode))))
+    dst))
+
+(decl gen_bswap (Type Reg) Reg)
+(rule (gen_bswap ty rn)
+  (let ((dst WritableReg (temp_writable_reg $I64))
+        (_ Unit (emit (MInst.Bswap dst rn ty))))
+    dst))
+
 (decl fpu_to_int (Reg bool bool Type Type) Reg)
 (rule (fpu_to_int rn signed sat in_ty out_ty)
   (let ((dst WritableReg (temp_writable_reg $I64))
@@ -814,6 +893,35 @@
   (let ((dst WritableReg (temp_writable_reg $I64))
         (_ Unit (emit (MInst.AtomicCas dst addr expected new ty))))
     dst))
+
+;; 128-bit atomics; results come back as a lo/hi pair.
+(decl gen_atomic_load128 (Reg) ValueRegs)
+(rule (gen_atomic_load128 addr)
+  (let ((lo WritableReg (temp_writable_reg $I64))
+        (hi WritableReg (temp_writable_reg $I64))
+        (_ Unit (emit (MInst.AtomicLoad128 lo hi addr))))
+    (value_regs lo hi)))
+
+(decl gen_atomic_store128 (Reg Reg Reg) SideEffectNoResult)
+(rule (gen_atomic_store128 src_lo src_hi addr)
+  (let ((tmp_lo WritableReg (temp_writable_reg $I64))
+        (tmp_hi WritableReg (temp_writable_reg $I64)))
+    (SideEffectNoResult.Inst (MInst.AtomicStore128 src_lo src_hi tmp_lo tmp_hi addr))))
+
+(decl gen_atomic_rmw128 (AtomicRmwOp Reg Reg Reg) ValueRegs)
+(rule (gen_atomic_rmw128 op addr src_lo src_hi)
+  (let ((lo WritableReg (temp_writable_reg $I64))
+        (hi WritableReg (temp_writable_reg $I64))
+        (tmp_hi WritableReg (temp_writable_reg $I64))
+        (_ Unit (emit (MInst.AtomicRmw128 op lo hi tmp_hi addr src_lo src_hi))))
+    (value_regs lo hi)))
+
+(decl gen_atomic_cas128 (Reg Reg Reg Reg Reg) ValueRegs)
+(rule (gen_atomic_cas128 addr exp_lo exp_hi new_lo new_hi)
+  (let ((lo WritableReg (temp_writable_reg $I64))
+        (hi WritableReg (temp_writable_reg $I64))
+        (_ Unit (emit (MInst.AtomicCas128 lo hi addr exp_lo exp_hi new_lo new_hi))))
+    (value_regs lo hi)))
 
 ;; Extend `src` for an atomic min/max: the compare inside the loop is
 ;; done at full width against the zero-extended loaded value.

@@ -204,7 +204,7 @@ impl TargetIsa for Ppc64Backend {
     }
 
     fn has_round(&self) -> bool {
-        false
+        true
     }
 
     fn has_blendv_lowering(&self, _: Type) -> bool {

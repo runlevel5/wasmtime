@@ -870,6 +870,41 @@ impl MachInstEmit for Inst {
                 sink.put4(enc_a(63, rd, ra, rb, 0, 21)); // fadd rd, ra, rb
             }
 
+            &Inst::FpuRound { rd, rn, mode } => {
+                let rd = reg_num(rd.to_reg());
+                let rn = reg_num(rn);
+                let word = match mode {
+                    // fri{m,p,z} frt, frb: X-form, opcode 63.
+                    FpuRoundMode::Floor => (63 << 26) | (rd << 21) | (rn << 11) | (488 << 1),
+                    FpuRoundMode::Ceil => (63 << 26) | (rd << 21) | (rn << 11) | (456 << 1),
+                    FpuRoundMode::Trunc => (63 << 26) | (rd << 21) | (rn << 11) | (424 << 1),
+                    // xsrdpic: round by the current mode, which is the
+                    // ties-to-even default. XX2-form, opcode 60, xo 107;
+                    // FPRs are VSRs 0-31, so the TX/BX bits stay zero.
+                    FpuRoundMode::Nearest => (60 << 26) | (rd << 21) | (rn << 11) | (107 << 2),
+                };
+                sink.put4(word);
+            }
+
+            &Inst::Bswap { rd, rn, ty } => {
+                // addi r0, r1, -16 ; st? rn, -16(r1) ; l?brx rd, 0, r0
+                //
+                // The slot is in the ELFv2 red zone, and r0 (the emission
+                // scratch) carries its address because the byte-reversed
+                // loads exist only in indexed form.
+                let rd = reg_num(rd.to_reg());
+                let rn = reg_num(rn);
+                sink.put4(enc_d(14, 0, 1, (-16i16) as u16)); // addi r0, r1, -16
+                let (store, brx_xo) = match ty {
+                    I16 => (enc_d(44, rn, 1, (-16i16) as u16), 790), // sth / lhbrx
+                    I32 => (enc_d(36, rn, 1, (-16i16) as u16), 534), // stw / lwbrx
+                    I64 => (enc_ds(62, rn, 1, -16, 0), 532),         // std / ldbrx
+                    _ => unreachable!("bswap of {ty}"),
+                };
+                sink.put4(store);
+                sink.put4(enc_x(rd, 0, 0, brx_xo));
+            }
+
             &Inst::MovToFpr { rd, rn } => {
                 sink.put4(enc_xx1(reg_num(rd.to_reg()), reg_num(rn), 179));
             }
@@ -1274,6 +1309,174 @@ impl MachInstEmit for Inst {
                 sink.put4(enc_cmp(0, 1, rd_n, expected, 32)); // cmpld
                 emit_bc_to_label(sink, done, CR0_EQ, false); // bne done
                 sink.put4(enc_x(new, 0, addr, stcx_xo) | 1); // stcx.
+                let bc_off = sink.cur_offset();
+                sink.use_label_at_offset(bc_off, loop_top, LabelUse::Branch16);
+                sink.put4(enc_bc(bo_for(false), CR0_EQ, 0, false)); // bne- loop
+                sink.bind_label(done, &mut state.ctrl_plane);
+                sink.put4(ISYNC);
+            }
+
+            &Inst::AtomicLoad128 { rd_lo, rd_hi, addr } => {
+                // sync ; lqarx r8, 0, addr ; cmpd r8, r8 ; bne- $+4 ; isync
+                //
+                // Plain `lq` raises an alignment interrupt in LE mode
+                // before ISA 3.0, so the reservation load stands in for
+                // it (the reservation itself is simply left behind). The
+                // compare/branch is the usual acquire control dependency.
+                let hi = reg_num(rd_hi.to_reg());
+                debug_assert_eq!(hi, 8);
+                debug_assert_eq!(reg_num(rd_lo.to_reg()), 9);
+                let addr = reg_num(addr);
+                debug_assert_eq!(addr, 3);
+                sink.put4(SYNC);
+                sink.put4(enc_x(hi, 0, addr, 276)); // lqarx r8, 0, addr
+                sink.put4(enc_cmp(0, 1, hi, hi, 0)); // cmpd r8, r8
+                sink.put4(enc_bc(bo_for(false), CR0_EQ, 4, false)); // bne- $+4
+                sink.put4(ISYNC);
+            }
+
+            &Inst::AtomicStore128 {
+                rs_lo,
+                rs_hi,
+                ref tmp_lo,
+                ref tmp_hi,
+                addr,
+            } => {
+                // sync ; loop: lqarx r8, 0, r3 ; stqcx. r4, 0, r3 ; bne- loop
+                debug_assert_eq!(reg_num(addr), 3);
+                debug_assert_eq!(reg_num(rs_hi), 4);
+                debug_assert_eq!(reg_num(rs_lo), 5);
+                debug_assert_eq!(reg_num(tmp_hi.to_reg()), 8);
+                debug_assert_eq!(reg_num(tmp_lo.to_reg()), 9);
+                sink.put4(SYNC);
+                let loop_top = sink.get_label();
+                sink.bind_label(loop_top, &mut state.ctrl_plane);
+                sink.put4(enc_x(8, 0, 3, 276)); // lqarx r8, 0, r3
+                sink.put4(enc_x(4, 0, 3, 182) | 1); // stqcx. r4, 0, r3
+                let bc_off = sink.cur_offset();
+                sink.use_label_at_offset(bc_off, loop_top, LabelUse::Branch16);
+                sink.put4(enc_bc(bo_for(false), CR0_EQ, 0, false)); // bne- loop
+            }
+
+            &Inst::AtomicRmw128 {
+                op,
+                ref rd_lo,
+                ref rd_hi,
+                ref tmp_hi,
+                addr,
+                src_lo,
+                src_hi,
+            } => {
+                // sync
+                // loop: lqarx r8, 0, r3          ; old: hi r8, lo r9
+                //       <new value into r10:r11 from r8:r9 op r4:r5>
+                //       stqcx. r10, 0, r3
+                //       bne- loop
+                //       isync
+                debug_assert_eq!(reg_num(addr), 3);
+                debug_assert_eq!(reg_num(src_hi), 4);
+                debug_assert_eq!(reg_num(src_lo), 5);
+                debug_assert_eq!(reg_num(rd_hi.to_reg()), 8);
+                debug_assert_eq!(reg_num(rd_lo.to_reg()), 9);
+                debug_assert_eq!(reg_num(tmp_hi.to_reg()), 10);
+                use crate::ir::AtomicRmwOp;
+                sink.put4(SYNC);
+                let loop_top = sink.get_label();
+                sink.bind_label(loop_top, &mut state.ctrl_plane);
+                sink.put4(enc_x(8, 0, 3, 276)); // lqarx r8, 0, r3
+                match op {
+                    AtomicRmwOp::Xchg => {
+                        sink.put4(enc_x_logic(4, 10, 4, 444)); // mr r10, r4
+                        sink.put4(enc_x_logic(5, 11, 5, 444)); // mr r11, r5
+                    }
+                    AtomicRmwOp::Add => {
+                        sink.put4(enc_xo(11, 9, 5, 10)); // addc r11, r9, r5
+                        sink.put4(enc_xo(10, 8, 4, 138)); // adde r10, r8, r4
+                    }
+                    AtomicRmwOp::Sub => {
+                        sink.put4(enc_xo(11, 5, 9, 8)); // subfc r11, r5, r9
+                        sink.put4(enc_xo(10, 4, 8, 136)); // subfe r10, r4, r8
+                    }
+                    AtomicRmwOp::And => {
+                        sink.put4(enc_x_logic(9, 11, 5, 28));
+                        sink.put4(enc_x_logic(8, 10, 4, 28));
+                    }
+                    AtomicRmwOp::Or => {
+                        sink.put4(enc_x_logic(9, 11, 5, 444));
+                        sink.put4(enc_x_logic(8, 10, 4, 444));
+                    }
+                    AtomicRmwOp::Xor => {
+                        sink.put4(enc_x_logic(9, 11, 5, 316));
+                        sink.put4(enc_x_logic(8, 10, 4, 316));
+                    }
+                    AtomicRmwOp::Nand => {
+                        sink.put4(enc_x_logic(9, 11, 5, 476));
+                        sink.put4(enc_x_logic(8, 10, 4, 476));
+                    }
+                    AtomicRmwOp::Smin
+                    | AtomicRmwOp::Smax
+                    | AtomicRmwOp::Umin
+                    | AtomicRmwOp::Umax => {
+                        // Decide by the high halves; only when they are
+                        // equal, re-compare cr0 on the low halves
+                        // (unsigned, as low halves carry no sign). Then
+                        // pick each half of the winner with isel on the
+                        // one surviving cr0 bit.
+                        let (signed_hi, want) = match op {
+                            AtomicRmwOp::Smin => (true, CR0_LT),
+                            AtomicRmwOp::Smax => (true, CR0_GT),
+                            AtomicRmwOp::Umin => (false, CR0_LT),
+                            AtomicRmwOp::Umax => (false, CR0_GT),
+                            _ => unreachable!(),
+                        };
+                        let cmp_hi_xo = if signed_hi { 0 } else { 32 };
+                        sink.put4(enc_cmp(0, 1, 8, 4, cmp_hi_xo)); // cmp(l)d r8, r4
+                        sink.put4(enc_bc(bo_for(false), CR0_EQ, 8, false)); // bne $+8
+                        sink.put4(enc_cmp(0, 1, 9, 5, 32)); // cmpld r9, r5
+                        sink.put4(enc_isel(10, 8, 4, want)); // isel r10, r8, r4
+                        sink.put4(enc_isel(11, 9, 5, want)); // isel r11, r9, r5
+                    }
+                }
+                sink.put4(enc_x(10, 0, 3, 182) | 1); // stqcx. r10, 0, r3
+                let bc_off = sink.cur_offset();
+                sink.use_label_at_offset(bc_off, loop_top, LabelUse::Branch16);
+                sink.put4(enc_bc(bo_for(false), CR0_EQ, 0, false)); // bne- loop
+                sink.put4(ISYNC);
+            }
+
+            &Inst::AtomicCas128 {
+                ref rd_lo,
+                ref rd_hi,
+                addr,
+                exp_lo,
+                exp_hi,
+                new_lo,
+                new_hi,
+            } => {
+                // sync
+                // loop: lqarx r8, 0, r3
+                //       cmpd r8, r4 ; bne done
+                //       cmpd r9, r5 ; bne done
+                //       stqcx. r6, 0, r3
+                //       bne- loop
+                // done: isync
+                debug_assert_eq!(reg_num(addr), 3);
+                debug_assert_eq!(reg_num(exp_hi), 4);
+                debug_assert_eq!(reg_num(exp_lo), 5);
+                debug_assert_eq!(reg_num(new_hi), 6);
+                debug_assert_eq!(reg_num(new_lo), 7);
+                debug_assert_eq!(reg_num(rd_hi.to_reg()), 8);
+                debug_assert_eq!(reg_num(rd_lo.to_reg()), 9);
+                sink.put4(SYNC);
+                let loop_top = sink.get_label();
+                let done = sink.get_label();
+                sink.bind_label(loop_top, &mut state.ctrl_plane);
+                sink.put4(enc_x(8, 0, 3, 276)); // lqarx r8, 0, r3
+                sink.put4(enc_cmp(0, 1, 8, 4, 32)); // cmpld r8, r4
+                emit_bc_to_label(sink, done, CR0_EQ, false); // bne done
+                sink.put4(enc_cmp(0, 1, 9, 5, 32)); // cmpld r9, r5
+                emit_bc_to_label(sink, done, CR0_EQ, false); // bne done
+                sink.put4(enc_x(6, 0, 3, 182) | 1); // stqcx. r6, 0, r3
                 let bc_off = sink.cur_offset();
                 sink.use_label_at_offset(bc_off, loop_top, LabelUse::Branch16);
                 sink.put4(enc_bc(bo_for(false), CR0_EQ, 0, false)); // bne- loop

@@ -701,10 +701,6 @@ fn valid_for_target(triple: &Triple, op: Opcode, args: &[Type], rets: &[Type]) -
                 (Opcode::UaddOverflow | Opcode::SaddOverflow),
                 (Opcode::UsubOverflow | Opcode::SsubOverflow),
                 (Opcode::UmulOverflow | Opcode::SmulOverflow),
-                (Opcode::Bitrev),
-                (Opcode::Bswap),
-                (Opcode::Iabs),
-                (Opcode::Ceil | Opcode::Floor | Opcode::Trunc | Opcode::Nearest),
                 // Narrow div/rem is lowered, but i8/i16 min/max of floats
                 // and the sub-word conversions are not exercised yet.
                 (

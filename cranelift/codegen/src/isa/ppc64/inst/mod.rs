@@ -29,7 +29,8 @@ use crate::isa::ppc64::abi::Ppc64MachineDeps;
 // Instructions (top level): definition
 
 pub use crate::isa::ppc64::lower::isle::generated_code::{
-    AluImmOp, AluOp, BitOp, DivOp, FpuOp1, FpuOp2, LoadOP, MInst as Inst, ShiftOp, StoreOP,
+    AluImmOp, AluOp, BitOp, DivOp, FpuOp1, FpuOp2, FpuRoundMode, LoadOP, MInst as Inst, ShiftOp,
+    StoreOP,
     UnaryOp,
 };
 
@@ -83,6 +84,14 @@ fn ppc64_get_operands(inst: &mut Inst, collector: &mut impl OperandVisitor) {
         Inst::FpuRRR { rd, ra, rb, .. } => {
             collector.reg_use(ra);
             collector.reg_use(rb);
+            collector.reg_def(rd);
+        }
+        Inst::FpuRound { rd, rn, .. } => {
+            collector.reg_use(rn);
+            collector.reg_def(rd);
+        }
+        Inst::Bswap { rd, rn, .. } => {
+            collector.reg_use(rn);
             collector.reg_def(rd);
         }
         Inst::FpuRR { rd, rn, .. }
@@ -257,6 +266,67 @@ fn ppc64_get_operands(inst: &mut Inst, collector: &mut impl OperandVisitor) {
             collector.reg_use(expected);
             collector.reg_use(new);
             collector.reg_early_def(rd);
+        }
+        Inst::AtomicLoad128 { rd_lo, rd_hi, addr } => {
+            // The address must be pinned away from the destination
+            // pair: defs are late-position, so a free address could
+            // legally share r8/r9 -- and `lqarx` with RA or RB inside
+            // the target pair is an invalid form (SIGILL in practice).
+            collector.reg_fixed_use(addr, gpr(3));
+            collector.reg_fixed_def(rd_hi, gpr(8));
+            collector.reg_fixed_def(rd_lo, gpr(9));
+        }
+        Inst::AtomicStore128 {
+            rs_lo,
+            rs_hi,
+            tmp_lo,
+            tmp_hi,
+            addr,
+        } => {
+            // `stqcx.` needs an even:odd source pair; r4:r5 with the
+            // high half in the even register, matching `lqarx`'s view
+            // of a little-endian quadword. The discarded reservation
+            // load lands in r8:r9.
+            collector.reg_fixed_use(addr, gpr(3));
+            collector.reg_fixed_use(rs_hi, gpr(4));
+            collector.reg_fixed_use(rs_lo, gpr(5));
+            collector.reg_fixed_def(tmp_hi, gpr(8));
+            collector.reg_fixed_def(tmp_lo, gpr(9));
+        }
+        Inst::AtomicRmw128 {
+            rd_lo,
+            rd_hi,
+            tmp_hi,
+            addr,
+            src_lo,
+            src_hi,
+            ..
+        } => {
+            collector.reg_fixed_use(addr, gpr(3));
+            collector.reg_fixed_use(src_hi, gpr(4));
+            collector.reg_fixed_use(src_lo, gpr(5));
+            collector.reg_fixed_def(rd_hi, gpr(8));
+            collector.reg_fixed_def(rd_lo, gpr(9));
+            // The computed value goes in r10:r11; r11 is the spill
+            // temp, permanently free, so only r10 needs reserving.
+            collector.reg_fixed_def(tmp_hi, gpr(10));
+        }
+        Inst::AtomicCas128 {
+            rd_lo,
+            rd_hi,
+            addr,
+            exp_lo,
+            exp_hi,
+            new_lo,
+            new_hi,
+        } => {
+            collector.reg_fixed_use(addr, gpr(3));
+            collector.reg_fixed_use(exp_hi, gpr(4));
+            collector.reg_fixed_use(exp_lo, gpr(5));
+            collector.reg_fixed_use(new_hi, gpr(6));
+            collector.reg_fixed_use(new_lo, gpr(7));
+            collector.reg_fixed_def(rd_hi, gpr(8));
+            collector.reg_fixed_def(rd_lo, gpr(9));
         }
         Inst::Fence => {}
         Inst::ReturnCall { info } => {
@@ -566,6 +636,18 @@ impl Inst {
                 };
                 format!("{mnemonic}.{ty} {}, {}, {}", wreg(*rd), reg(*ra), reg(*rb))
             }
+            Inst::FpuRound { rd, rn, mode } => {
+                let mnemonic = match mode {
+                    FpuRoundMode::Floor => "frim",
+                    FpuRoundMode::Ceil => "frip",
+                    FpuRoundMode::Trunc => "friz",
+                    FpuRoundMode::Nearest => "xsrdpic",
+                };
+                format!("{mnemonic} {}, {}", wreg(*rd), reg(*rn))
+            }
+            Inst::Bswap { rd, rn, ty } => {
+                format!("bswap{} {}, {}", ty.bits(), wreg(*rd), reg(*rn))
+            }
             Inst::FpuRR { op, rd, rn, ty } => {
                 let mnemonic = match op {
                     FpuOp1::Neg => "fneg",
@@ -745,6 +827,54 @@ impl Inst {
                 wreg(*rd),
                 reg(*expected),
                 reg(*new),
+                reg(*addr)
+            ),
+            Inst::AtomicLoad128 { rd_lo, rd_hi, addr } => format!(
+                "atomic_load128 {}, {}, ({})",
+                wreg(*rd_lo),
+                wreg(*rd_hi),
+                reg(*addr)
+            ),
+            Inst::AtomicStore128 {
+                rs_lo, rs_hi, addr, ..
+            } => format!(
+                "atomic_store128 {}, {}, ({})",
+                reg(*rs_lo),
+                reg(*rs_hi),
+                reg(*addr)
+            ),
+            Inst::AtomicRmw128 {
+                op,
+                rd_lo,
+                rd_hi,
+                addr,
+                src_lo,
+                src_hi,
+                ..
+            } => format!(
+                "atomic_rmw128.{op:?} {}, {}, {}, {}, ({})",
+                wreg(*rd_lo),
+                wreg(*rd_hi),
+                reg(*src_lo),
+                reg(*src_hi),
+                reg(*addr)
+            ),
+            Inst::AtomicCas128 {
+                rd_lo,
+                rd_hi,
+                addr,
+                exp_lo,
+                exp_hi,
+                new_lo,
+                new_hi,
+            } => format!(
+                "atomic_cas128 {}, {}, {}, {}, {}, {}, ({})",
+                wreg(*rd_lo),
+                wreg(*rd_hi),
+                reg(*exp_lo),
+                reg(*exp_hi),
+                reg(*new_lo),
+                reg(*new_hi),
                 reg(*addr)
             ),
             Inst::Fence => "sync".to_string(),

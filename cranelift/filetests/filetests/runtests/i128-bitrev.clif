@@ -9,6 +9,7 @@ target riscv64 has_zbb has_zbkb
 target riscv64 has_c has_zcb
 set enable_multi_ret_implicit_sret
 target s390x
+target powerpc64le
 
 function %reverse_bits_zero() -> i8 {
 block0:

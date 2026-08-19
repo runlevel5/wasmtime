@@ -1,6 +1,7 @@
 test run
 target riscv64
 target riscv64 has_c has_zcb
+target powerpc64le
 
 function %a(i16, f64, i32, i64, i16, i128, f32) -> i16 {
     ss0 = explicit_slot 24

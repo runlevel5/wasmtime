@@ -226,6 +226,14 @@ impl generated_code::Context for Ppc64IsleContext<'_, '_, MInst, Ppc64Backend> {
         u16::try_from(ty.bits() - 1).unwrap()
     }
 
+    /// `cls` on an N-bit type is `clz64(sext(x) ^ (sext(x) >> 63)) -
+    /// (65 - N)`: the XOR turns leading sign bits into leading zeros
+    /// (plus the sign bit itself, hence the extra 1), and sign
+    /// extension makes the count width-independent.
+    fn cls_adjust(&mut self, ty: Type) -> u16 {
+        (ty.bits() as i16 - 65) as u16
+    }
+
     fn clz_narrow_adjust(&mut self, ty: Type) -> u16 {
         // The count is taken over a 64-bit zero-extension, so subtract the
         // bits the extension added.
