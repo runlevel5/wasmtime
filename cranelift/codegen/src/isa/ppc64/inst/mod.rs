@@ -200,6 +200,26 @@ fn ppc64_get_operands(inst: &mut Inst, collector: &mut impl OperandVisitor) {
             collector.reg_use(rb);
             collector.reg_def(rd);
         }
+        Inst::VecExtractLaneInt { rd, rn, .. } | Inst::VecExtractLaneFpu { rd, rn, .. } => {
+            collector.reg_use(rn);
+            collector.reg_def(rd);
+        }
+        Inst::VecInsertLane { rd, rv, rs, .. } => {
+            collector.reg_use(rv);
+            collector.reg_use(rs);
+            collector.reg_def(rd);
+        }
+        Inst::VecSel {
+            rd,
+            if_set,
+            if_clear,
+            mask,
+        } => {
+            collector.reg_use(if_set);
+            collector.reg_use(if_clear);
+            collector.reg_use(mask);
+            collector.reg_def(rd);
+        }
         Inst::VecTestLanes { rd, rn, .. } => {
             collector.reg_use(rn);
             collector.reg_def(rd);
@@ -993,6 +1013,42 @@ impl Inst {
                     ),
                 }
             }
+            Inst::VecExtractLaneInt { rd, rn, ty, lane }
+            | Inst::VecExtractLaneFpu { rd, rn, ty, lane } => {
+                format!(
+                    "vec_extract{} {}, {}, lane {lane}",
+                    ty.lane_bits(),
+                    wreg(*rd),
+                    reg(*rn)
+                )
+            }
+            Inst::VecInsertLane {
+                rd,
+                rv,
+                rs,
+                ty,
+                lane,
+            } => {
+                format!(
+                    "vec_insert{} {}, {}, {}, lane {lane}",
+                    ty.lane_bits(),
+                    wreg(*rd),
+                    reg(*rv),
+                    reg(*rs)
+                )
+            }
+            Inst::VecSel {
+                rd,
+                if_set,
+                if_clear,
+                mask,
+            } => format!(
+                "xxsel {}, {}, {}, {}",
+                wreg(*rd),
+                reg(*if_clear),
+                reg(*if_set),
+                reg(*mask)
+            ),
             Inst::VecTestLanes { rd, rn, ty, all } => {
                 let kind = if *all { "all" } else { "any" };
                 format!(

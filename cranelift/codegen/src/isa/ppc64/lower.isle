@@ -1673,3 +1673,30 @@
 
 (rule 1 (lower (vany_true _ x @ (value_type (ty_vec128 ty))))
   (output_reg (vec_test_lanes (put_in_reg x) ty false)))
+
+;;;; Lane extract and insert ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; Integer lanes come out through a splat-and-read sequence and go in
+;; through a red-zone round-trip; float lanes convert at the boundary
+;; between the raw lane bits and the widened-double form scalars use.
+;; See the instruction definitions for the endianness reasoning.
+
+(rule (lower (extractlane _ x @ (value_type $I8X16) (u8_from_uimm8 lane)))
+  (output_reg (vec_extract_lane_int (put_in_reg x) $I8X16 lane)))
+(rule (lower (extractlane _ x @ (value_type $I16X8) (u8_from_uimm8 lane)))
+  (output_reg (vec_extract_lane_int (put_in_reg x) $I16X8 lane)))
+(rule (lower (extractlane _ x @ (value_type $I32X4) (u8_from_uimm8 lane)))
+  (output_reg (vec_extract_lane_int (put_in_reg x) $I32X4 lane)))
+(rule (lower (extractlane _ x @ (value_type $I64X2) (u8_from_uimm8 lane)))
+  (output_reg (vec_extract_lane_int (put_in_reg x) $I64X2 lane)))
+(rule (lower (extractlane _ x @ (value_type $F32X4) (u8_from_uimm8 lane)))
+  (output_reg (vec_extract_lane_fpu (put_in_reg x) $F32X4 lane)))
+(rule (lower (extractlane _ x @ (value_type $F64X2) (u8_from_uimm8 lane)))
+  (output_reg (vec_extract_lane_fpu (put_in_reg x) $F64X2 lane)))
+
+(rule (lower (insertlane _ x @ (value_type (ty_vec128 ty)) y (u8_from_uimm8 lane)))
+  (output_reg (vec_insert_lane (put_in_reg x) (put_in_reg y) ty lane)))
+
+;; Vector bitselect is a single `xxsel`.
+(rule 2 (lower (bitselect (ty_vec128 _) mask x y))
+  (output_reg (vec_sel (put_in_reg x) (put_in_reg y) (put_in_reg mask))))

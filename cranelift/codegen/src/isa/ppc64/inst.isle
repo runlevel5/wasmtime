@@ -363,6 +363,51 @@
       (rb Reg)
       (ty Type))
 
+    ;; Extract a lane to a GPR: splat the wanted lane across the
+    ;; reserved scratch v0 (`vsplt{b,h,w}`, or `xxpermdi` for
+    ;; doublewords) and read big-endian doubleword 0 with `mfvsrd`.
+    ;; The value lands in the low lane-width bits with copies of
+    ;; itself above, which the backend's narrow-value convention
+    ;; permits. Register-only and POWER8-clean; the lane index is
+    ;; translated to big-endian element numbering at emission, the
+    ;; only place allowed to see it.
+    (VecExtractLaneInt
+      (rd WritableReg)
+      (rn Reg)
+      (ty Type)
+      (lane u8))
+
+    ;; Extract a float lane to an FPR: `xxspltw` + `xscvspdpn` widens
+    ;; an `f32` lane into the double-held-in-FPR form scalars use;
+    ;; an `f64` lane is one `xxpermdi` placing it in doubleword 0.
+    (VecExtractLaneFpu
+      (rd WritableReg)
+      (rn Reg)
+      (ty Type)
+      (lane u8))
+
+    ;; Replace one lane: the vector round-trips through the red zone
+    ;; and the scalar store overwrites the lane's bytes -- with the
+    ;; little-endian lane order, lane i of an `iNxM` sits at byte
+    ;; offset i*N/8, and `stfs` converts the widened-double `f32`
+    ;; scalar to its single-precision lane bits for free. Uniform
+    ;; across every lane type and POWER8-clean; the ISA 3.0
+    ;; `vinsert*` forms are a later optimization.
+    (VecInsertLane
+      (rd WritableReg)
+      (rv Reg)
+      (rs Reg)
+      (ty Type)
+      (lane u8))
+
+    ;; Bitwise select (`xxsel`): each result bit comes from `if_set`
+    ;; where the mask bit is set, `if_clear` where it is clear.
+    (VecSel
+      (rd WritableReg)
+      (if_set Reg)
+      (if_clear Reg)
+      (mask Reg))
+
     ;; Reduce a vector to a 0/1 GPR: whether all lanes, or any lane, is
     ;; non-zero. The record form of the equality compare sets CR6, whose
     ;; EQ bit means "no lane compared equal" (so every lane is non-zero)
@@ -939,6 +984,30 @@
 (rule (vec_alu_rrr op a b ty)
   (let ((dst WritableReg (temp_writable_reg $I8X16))
         (_ Unit (emit (MInst.VecAluRRR op dst a b ty))))
+    dst))
+
+(decl vec_extract_lane_int (Reg Type u8) Reg)
+(rule (vec_extract_lane_int rn ty lane)
+  (let ((dst WritableReg (temp_writable_reg $I64))
+        (_ Unit (emit (MInst.VecExtractLaneInt dst rn ty lane))))
+    dst))
+
+(decl vec_extract_lane_fpu (Reg Type u8) Reg)
+(rule (vec_extract_lane_fpu rn ty lane)
+  (let ((dst WritableReg (temp_writable_reg $F64))
+        (_ Unit (emit (MInst.VecExtractLaneFpu dst rn ty lane))))
+    dst))
+
+(decl vec_insert_lane (Reg Reg Type u8) Reg)
+(rule (vec_insert_lane rv rs ty lane)
+  (let ((dst WritableReg (temp_writable_reg $I8X16))
+        (_ Unit (emit (MInst.VecInsertLane dst rv rs ty lane))))
+    dst))
+
+(decl vec_sel (Reg Reg Reg) Reg)
+(rule (vec_sel if_set if_clear mask)
+  (let ((dst WritableReg (temp_writable_reg $I8X16))
+        (_ Unit (emit (MInst.VecSel dst if_set if_clear mask))))
     dst))
 
 (decl vec_test_lanes (Reg Type bool) Reg)

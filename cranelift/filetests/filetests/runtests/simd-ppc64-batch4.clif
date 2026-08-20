@@ -1,0 +1,168 @@
+test interpret
+test run
+target powerpc64le
+target powerpc64le has_isa_3_0
+
+;; Every input is asymmetric so that a wrong lane-to-element
+;; translation (lane i reading element i instead of M-1-i) returns a
+;; visibly different value rather than passing by symmetry.
+
+function %ext_i8_0(i8x16) -> i8 {
+block0(v0: i8x16):
+    v1 = extractlane v0, 0
+    return v1
+}
+; run: %ext_i8_0([10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25]) == 10
+
+function %ext_i8_15(i8x16) -> i8 {
+block0(v0: i8x16):
+    v1 = extractlane v0, 15
+    return v1
+}
+; run: %ext_i8_15([10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25]) == 25
+
+function %ext_i8_7(i8x16) -> i8 {
+block0(v0: i8x16):
+    v1 = extractlane v0, 7
+    return v1
+}
+; run: %ext_i8_7([10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25]) == 17
+
+function %ext_i16_2(i16x8) -> i16 {
+block0(v0: i16x8):
+    v1 = extractlane v0, 2
+    return v1
+}
+; run: %ext_i16_2([100 200 300 400 500 600 700 800]) == 300
+
+function %ext_i32_1(i32x4) -> i32 {
+block0(v0: i32x4):
+    v1 = extractlane v0, 1
+    return v1
+}
+; run: %ext_i32_1([0x11111111 0x22222222 0x33333333 0x44444444]) == 0x22222222
+
+function %ext_i64_0(i64x2) -> i64 {
+block0(v0: i64x2):
+    v1 = extractlane v0, 0
+    return v1
+}
+; run: %ext_i64_0([0x0123456789abcdef 0xfedcba9876543210]) == 0x0123456789abcdef
+
+function %ext_i64_1(i64x2) -> i64 {
+block0(v0: i64x2):
+    v1 = extractlane v0, 1
+    return v1
+}
+; run: %ext_i64_1([0x0123456789abcdef 0xfedcba9876543210]) == 0xfedcba9876543210
+
+function %ext_f32_3(f32x4) -> f32 {
+block0(v0: f32x4):
+    v1 = extractlane v0, 3
+    return v1
+}
+; run: %ext_f32_3([0x1.0p0 0x1.0p1 0x1.0p2 -0x1.5p3]) == -0x1.5p3
+
+function %ext_f32_0(f32x4) -> f32 {
+block0(v0: f32x4):
+    v1 = extractlane v0, 0
+    return v1
+}
+; run: %ext_f32_0([0x1.0p0 0x1.0p1 0x1.0p2 -0x1.5p3]) == 0x1.0p0
+
+function %ext_f64_0(f64x2) -> f64 {
+block0(v0: f64x2):
+    v1 = extractlane v0, 0
+    return v1
+}
+; run: %ext_f64_0([0x1.921fb54442d18p1 -0x1.5bf0a8b145769p1]) == 0x1.921fb54442d18p1
+
+function %ext_f64_1(f64x2) -> f64 {
+block0(v0: f64x2):
+    v1 = extractlane v0, 1
+    return v1
+}
+; run: %ext_f64_1([0x1.921fb54442d18p1 -0x1.5bf0a8b145769p1]) == -0x1.5bf0a8b145769p1
+
+;; The wasm extract_lane_s / extract_lane_u shapes: the extension must
+;; see only the lane's bits, not the splat copies above them.
+function %ext_i8_sext(i8x16) -> i32 {
+block0(v0: i8x16):
+    v1 = extractlane v0, 2
+    v2 = sextend.i32 v1
+    return v2
+}
+; run: %ext_i8_sext([1 2 0xff 4 5 6 7 8 9 10 11 12 13 14 15 16]) == -1
+
+function %ext_i8_uext(i8x16) -> i32 {
+block0(v0: i8x16):
+    v1 = extractlane v0, 2
+    v2 = uextend.i32 v1
+    return v2
+}
+; run: %ext_i8_uext([1 2 0xff 4 5 6 7 8 9 10 11 12 13 14 15 16]) == 255
+
+function %ins_i8_0(i8x16, i8) -> i8x16 {
+block0(v0: i8x16, v1: i8):
+    v2 = insertlane v0, v1, 0
+    return v2
+}
+; run: %ins_i8_0([10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25], 99) == [99 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25]
+
+function %ins_i8_15(i8x16, i8) -> i8x16 {
+block0(v0: i8x16, v1: i8):
+    v2 = insertlane v0, v1, 15
+    return v2
+}
+; run: %ins_i8_15([10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25], 99) == [10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 99]
+
+function %ins_i16_3(i16x8, i16) -> i16x8 {
+block0(v0: i16x8, v1: i16):
+    v2 = insertlane v0, v1, 3
+    return v2
+}
+; run: %ins_i16_3([100 200 300 400 500 600 700 800], -1) == [100 200 300 0xffff 500 600 700 800]
+
+function %ins_i32_2(i32x4, i32) -> i32x4 {
+block0(v0: i32x4, v1: i32):
+    v2 = insertlane v0, v1, 2
+    return v2
+}
+; run: %ins_i32_2([0x11111111 0x22222222 0x33333333 0x44444444], 0x99999999) == [0x11111111 0x22222222 0x99999999 0x44444444]
+
+function %ins_i64_0(i64x2, i64) -> i64x2 {
+block0(v0: i64x2, v1: i64):
+    v2 = insertlane v0, v1, 0
+    return v2
+}
+; run: %ins_i64_0([0x0123456789abcdef 0xfedcba9876543210], -1) == [0xffffffffffffffff 0xfedcba9876543210]
+
+function %ins_i64_1(i64x2, i64) -> i64x2 {
+block0(v0: i64x2, v1: i64):
+    v2 = insertlane v0, v1, 1
+    return v2
+}
+; run: %ins_i64_1([0x0123456789abcdef 0xfedcba9876543210], -1) == [0x0123456789abcdef 0xffffffffffffffff]
+
+function %ins_f32_1(f32x4, f32) -> f32x4 {
+block0(v0: f32x4, v1: f32):
+    v2 = insertlane v0, v1, 1
+    return v2
+}
+; run: %ins_f32_1([0x1.0p0 0x1.0p1 0x1.0p2 0x1.0p3], -0x1.5p3) == [0x1.0p0 -0x1.5p3 0x1.0p2 0x1.0p3]
+
+function %ins_f64_1(f64x2, f64) -> f64x2 {
+block0(v0: f64x2, v1: f64):
+    v2 = insertlane v0, v1, 1
+    return v2
+}
+; run: %ins_f64_1([0x1.921fb54442d18p1 0x1.0p0], -0x1.5bf0a8b145769p1) == [0x1.921fb54442d18p1 -0x1.5bf0a8b145769p1]
+
+;; Round-trip: extract then insert back must reproduce the input.
+function %roundtrip(i32x4) -> i32x4 {
+block0(v0: i32x4):
+    v1 = extractlane v0, 2
+    v2 = insertlane v0, v1, 2
+    return v2
+}
+; run: %roundtrip([0x11111111 0x22222222 0x33333333 0x44444444]) == [0x11111111 0x22222222 0x33333333 0x44444444]

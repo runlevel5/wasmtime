@@ -182,6 +182,22 @@ pub(crate) fn enc_xx2(t6: u32, b6: u32, xo: u32) -> u32 {
         | (t6 >> 5)
 }
 
+/// XX4-form `xxsel`: `60 | T5 | A5 | B5 | C5 | 11 | CX AX BX TX`.
+/// Bit i of the result is XB's where XC's is set, XA's where clear.
+pub(crate) fn enc_xxsel(t6: u32, a6: u32, b6: u32, c6: u32) -> u32 {
+    debug_assert!(t6 < 64 && a6 < 64 && b6 < 64 && c6 < 64);
+    (60 << 26)
+        | ((t6 & 31) << 21)
+        | ((a6 & 31) << 16)
+        | ((b6 & 31) << 11)
+        | ((c6 & 31) << 6)
+        | (3 << 4)
+        | ((c6 >> 5) << 3)
+        | ((a6 >> 5) << 2)
+        | ((b6 >> 5) << 1)
+        | (t6 >> 5)
+}
+
 /// `xxspltw`: XX2-form: `60 | T5 | 00 UIM | B5 | XO9=164 | BX | TX`.
 pub(crate) fn enc_xxspltw(t6: u32, b6: u32, uim: u32) -> u32 {
     debug_assert!(t6 < 64 && b6 < 64 && uim < 4);
@@ -365,6 +381,7 @@ mod tests {
         assert_eq!(enc_vx(2, 3, 4, 1282), 0x1043_2502); // vavgsb
         assert_eq!(enc_vx(2, 3, 4, 1346), 0x1043_2542); // vavgsh
         assert_eq!(enc_vx(2, 3, 4, 1410), 0x1043_2582); // vavgsw
+        assert_eq!(enc_xxsel(34, 35, 36, 37), 0xF043_217F); // xxsel
         // Shift-by-immediate forms, all verified against llvm-mc.
         assert_eq!(enc_md(4, 3, 7, 56, 1), 0x7883_3E24); // sldi r3, r4, 7
         assert_eq!(enc_md(4, 3, 57, 7, 0), 0x7883_C9C2); // srdi r3, r4, 7

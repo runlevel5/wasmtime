@@ -1617,6 +1617,113 @@ impl MachInstEmit for Inst {
                 sink.put4(word);
             }
 
+            &Inst::VecExtractLaneInt { rd, rn, ty, lane } => {
+                let rd_n = reg_num(rd.to_reg());
+                let src = vsr_num(rn);
+                let lane = u32::from(lane);
+                // Splat the wanted lane across the v0 scratch, then read
+                // BE doubleword 0. Lane index -> BE element number.
+                let read_from = match ty.lane_bits() {
+                    8 => {
+                        sink.put4(enc_vx(VEC_SCRATCH - 32, 15 - lane, src - 32, 524));
+                        VEC_SCRATCH
+                    }
+                    16 => {
+                        sink.put4(enc_vx(VEC_SCRATCH - 32, 7 - lane, src - 32, 588));
+                        VEC_SCRATCH
+                    }
+                    32 => {
+                        sink.put4(enc_vx(VEC_SCRATCH - 32, 3 - lane, src - 32, 652));
+                        VEC_SCRATCH
+                    }
+                    64 => {
+                        // Wasm lane 1 is already BE doubleword 0.
+                        if lane == 1 {
+                            src
+                        } else {
+                            sink.put4(enc_xxpermdi(VEC_SCRATCH, src, src, 2));
+                            VEC_SCRATCH
+                        }
+                    }
+                    _ => unreachable!("vector lane width {ty}"),
+                };
+                sink.put4(enc_mxvsrd(read_from, rd_n, 51)); // mfvsrd
+            }
+
+            &Inst::VecExtractLaneFpu { rd, rn, ty, lane } => {
+                let dst = vsr_num(rd.to_reg());
+                let src = vsr_num(rn);
+                let lane = u32::from(lane);
+                match ty.lane_bits() {
+                    32 => {
+                        // Splat the lane's word to all positions of the
+                        // scratch, then widen the single in BE word 0 to
+                        // the double the scalar convention holds.
+                        sink.put4(enc_xxspltw(VEC_SCRATCH, src, 3 - lane));
+                        sink.put4(enc_xx2(dst, VEC_SCRATCH, 331)); // xscvspdpn
+                    }
+                    64 => {
+                        let dm = if lane == 0 { 2 } else { 0 };
+                        sink.put4(enc_xxpermdi(dst, src, src, dm));
+                    }
+                    _ => unreachable!("float lane width {ty}"),
+                }
+            }
+
+            &Inst::VecInsertLane {
+                rd,
+                rv,
+                rs,
+                ty,
+                lane,
+            } => {
+                // Round-trip through the red zone at -16(r1): store the
+                // vector, overwrite the lane's bytes with the scalar
+                // store that matches the lane type, reload.
+                let dst = vsr_num(rd.to_reg());
+                let vec = vsr_num(rv);
+                let lane_bytes = u32::from(ty.lane_bits()) / 8;
+                let off = -16i16 + (u32::from(lane) * lane_bytes) as i16;
+                sink.put4(enc_d(14, 0, 1, (-16i16) as u16)); // addi r0, r1, -16
+                if emit_info.isa_flags.has_isa_3_0() {
+                    sink.put4(enc_vsx_x(vec, 0, 0, 396)); // stxvx vec, 0, r0
+                } else {
+                    sink.put4(enc_xxpermdi(VEC_SCRATCH, vec, vec, 2));
+                    sink.put4(enc_vsx_x(VEC_SCRATCH, 0, 0, 972)); // stxvd2x
+                }
+                let s = reg_num(rs);
+                let word = match (ty.lane_type().is_float(), ty.lane_bits()) {
+                    (false, 8) => enc_d(38, s, 1, off as u16),  // stb
+                    (false, 16) => enc_d(44, s, 1, off as u16), // sth
+                    (false, 32) => enc_d(36, s, 1, off as u16), // stw
+                    (false, 64) => enc_ds(62, s, 1, off, 0),    // std
+                    (true, 32) => enc_d(52, s, 1, off as u16),  // stfs
+                    (true, 64) => enc_d(54, s, 1, off as u16),  // stfd
+                    _ => unreachable!("vector lane width {ty}"),
+                };
+                sink.put4(word);
+                if emit_info.isa_flags.has_isa_3_0() {
+                    sink.put4(enc_vsx_x(dst, 0, 0, 268)); // lxvx dst, 0, r0
+                } else {
+                    sink.put4(enc_vsx_x(dst, 0, 0, 844)); // lxvd2x
+                    sink.put4(enc_xxpermdi(dst, dst, dst, 2)); // xxswapd
+                }
+            }
+
+            &Inst::VecSel {
+                rd,
+                if_set,
+                if_clear,
+                mask,
+            } => {
+                sink.put4(enc_xxsel(
+                    vsr_num(rd.to_reg()),
+                    vsr_num(if_clear),
+                    vsr_num(if_set),
+                    vsr_num(mask),
+                ));
+            }
+
             &Inst::VecTestLanes { rd, rn, ty, all } => {
                 // xxlxor v0, v0, v0        ; the scratch holds zero
                 // vcmpequX. v0, rn, v0     ; sets CR6, result discarded
