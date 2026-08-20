@@ -742,6 +742,57 @@ post-mortems:
    later optimization; measure before assuming it wins (see Phase 6:
    off-critical-path instruction count has measured zero effect).
 
+#### Batches 1-2 (2026-08-20): compares, min/max, shifts, float lane arith
+
+Landed: integer compares (all ten conditions, four widths), integer
+min/max signed and unsigned, per-lane shifts, float lane arithmetic
+(add/sub/mul/div/sqrt/neg/abs), float compares (all fourteen
+`FloatCC`s), `iabs`, `avg_round`. 39 of upstream's `simd-*.clif`
+runtests now execute on ppc64le.
+
+Four bugs, every one caught by a test rather than by reading the code —
+worth recording because they cluster into two lessons:
+
+1. **`ishl`/`ushr`/`sshr` on a vector by an `i128` amount crashed the
+   compiler.** CLIF lets the shift amount be any integer type, and
+   upstream's `simd-ishl.clif` exercises `i128`; my own runtest only
+   used `i32`, so it passed. The fix reused `shift_amt_64`, already
+   written for scalar i128 shifts.
+2. **The scalar `fcmp` rule had a wildcard type guard and so also
+   matched *vector* compares**, feeding vector registers into a scalar
+   compare. regalloc2's `left: Vector, right: Int` assertion caught it,
+   but that assertion is debug-only: in release this was a silent
+   miscompilation. An audit found `fcmp` was the only unguarded rule.
+3. **`fcmp`'s controlling type is the *result*, not the operands** --
+   `i8` for a scalar compare. So the obvious guard (`ty_scalar_float`
+   on the controlling type) matched nothing and broke every scalar
+   `fcmp`, including the `fcmp ne v, v` NaN checks inside `fmul` and
+   `fdemote`. All fourteen rules now bind the operand type explicitly;
+   the vector ones had been keying lane width off the result type,
+   which was sound only because a compare's result lane width always
+   equals its operand's.
+4. **`Unordered` was implemented as NOR where it needed NAND.**
+   Unordered means "not both self-equal"; NOR and NAND agree except
+   when exactly one operand is NaN, which is what the runtest's
+   `[NaN, 1.0]` case hit. `Ordered`/`Unordered` now share one helper
+   and are each other's complement by construction.
+
+The lessons: **a local `test run` PASS for a cross target means
+nothing** -- macOS silently *skips* those files rather than compiling
+them, so the trial-enable sweep must run on the POWER9 (an earlier
+sweep "passed" 68 files locally of which only 39 actually work). And
+**upstream's runtest corpus is worth more than hand-written tests** for
+finding the cases one would not think to write: i128 shift amounts,
+NaN-versus-normal comparison pairs.
+
+Still unimplemented, blocking further upstream tests: `vall_true` /
+`vany_true` (needs CR6 reading -- the backend only uses cr0 so far,
+so this is a small design step), lane extract/insert, 64-bit vector
+types (`i8x8`, `i32x2`, `f32x2`), `bitcast` to `i128`, widening and
+narrowing, `shuffle`/`swizzle`, saturating arithmetic, `fmin`/`fmax`
+(the wasm NaN semantics need checking against `xvmin`/`xvmax`
+behaviour on hardware before implementing).
+
 Ops landed with the foundations: v128 load/store, `vconst`, all-lane
 `splat` (int and float), `iadd`/`isub` at every lane width,
 `band`/`bor`/`bxor`/`bnot`, vector-vector `bitcast`, plus regalloc
