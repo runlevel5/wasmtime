@@ -807,8 +807,42 @@ writing the emit code, and encoding the hazard into the test rather
 than discovering it afterwards. 46 upstream `simd-*.clif` runtests now
 execute on hardware.
 
-Still unimplemented, blocking further upstream tests: lane
-extract/insert, 64-bit vector
+#### Batch 4 (2026-08-20): lane extract/insert — the flagged trap, defused
+
+The plan marked this the SIMD danger zone (ISA 3.0 extract/insert
+instructions vs POWER8), and the resolution is worth recording because
+it dissolved rather than materialised:
+
+- **Extract needs no memory and no P8/P9 split at all.** Splat the
+  wanted lane across the reserved v0 scratch (`vsplt{b,h,w}`, or one
+  `xxpermdi` for doublewords), then `mfvsrd`. The replication leaves
+  the lane value in the low bits with copies above -- exactly the
+  garbage the narrow-value convention tolerates, and the subsequent
+  `sextend`/`uextend` that wasm's `extract_lane_s/u` become read only
+  the lane's bits. Two instructions, POWER8-clean. f32 lanes widen
+  into the scalar double convention with `xxspltw` + `xscvspdpn`; f64
+  lanes are one `xxpermdi`.
+- **Insert is a red-zone round-trip** where the *scalar store* does
+  all the type dispatch -- `stfs` converts the widened-double f32
+  scalar to its 4-byte lane bits as a plain side effect of being a
+  single-precision store. One sequence for all six lane types; only
+  the vector store/load halves gate on ISA 3.0. The `vinsert*`
+  register path remains a P9 optimization for later.
+- The lane→BE-element translation (15-lane, 7-lane, 3-lane, 1-lane)
+  exists only in emission, per the foundations convention, and the
+  runtest makes translation errors unpassable: every input vector is
+  asymmetric, so lane i reading element i instead of M-1-i returns a
+  visibly wrong value. First hardware contact passed both paths with
+  no fixes.
+- Vector `bitselect` turned out to be a single `xxsel`, added in
+  passing (operand order: result bit = mask ? XB : XA, so CLIF's
+  (mask, x, y) maps to XA=y, XB=x).
+- Triage note: the `simd-*_32.clif` / `-32` upstream runtests are for
+  **32-bit pointer targets** (the verifier rejects them under a
+  64-bit ISA) -- inapplicable, not gaps. 53 upstream `simd-*.clif`
+  files now execute on hardware.
+
+Still unimplemented, blocking further upstream tests: 64-bit vector
 types (`i8x8`, `i32x2`, `f32x2`), `bitcast` to `i128`, widening and
 narrowing, `shuffle`/`swizzle`, saturating arithmetic, `fmin`/`fmax`
 (the wasm NaN semantics need checking against `xvmin`/`xvmax`
