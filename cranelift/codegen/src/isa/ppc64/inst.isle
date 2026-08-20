@@ -160,6 +160,11 @@
     (Shl)
     (ShrU)
     (ShrS)
+    ;; Rounding average, `(a + b + 1) >> 1`, which is exactly CLIF's
+    ;; `avg_round` and wasm's `avgr_u`. Byte, halfword and word only:
+    ;; the ISA has no doubleword average, and neither proposal needs one.
+    (AvgRoundS)
+    (AvgRoundU)
 ))
 
 ;; Floating-point lane arithmetic; the lane type selects between the
@@ -170,6 +175,12 @@
     (Sub)
     (Mul)
     (Div)
+    ;; Ordered lane comparisons, producing an all-ones or all-zeros
+    ;; mask. A NaN operand makes all three false, which is what the
+    ;; unordered-aware conditions are built from.
+    (CmpEq)
+    (CmpGt)
+    (CmpGe)
 ))
 
 (type VecFpuOp1
@@ -932,10 +943,12 @@
 (rule (vec_not x ty) (vec_alu_rrr (VecAluOp.Nor) x x ty))
 
 ;; Splat a scalar shift amount across the lanes of `ty`. The amount is
-;; left unmasked: see `VecAluOp.Shl`.
+;; left unmasked: see `VecAluOp.Shl`. CLIF permits the amount to be any
+;; integer type including `i128`, so it goes through `shift_amt_64`,
+;; which takes just the low doubleword of a pair.
 (decl vec_shift_amount (Value Type) Reg)
 (rule (vec_shift_amount amt ty)
-  (vec_splat_lane (mov_to_vec (put_in_reg amt)) ty))
+  (vec_splat_lane (mov_to_vec (shift_amt_64 amt)) ty))
 
 (decl gen_vec_load (AMode MemFlagsData) Reg)
 (rule (gen_vec_load mem flags)

@@ -969,6 +969,8 @@ impl Inst {
                     VecAluOp::Shl => "vsl",
                     VecAluOp::ShrU => "vsr",
                     VecAluOp::ShrS => "vsra",
+                    VecAluOp::AvgRoundS => "vavgs",
+                    VecAluOp::AvgRoundU => "vavgu",
                     VecAluOp::And => "xxland",
                     VecAluOp::Or => "xxlor",
                     VecAluOp::Xor => "xxlxor",
@@ -993,6 +995,9 @@ impl Inst {
                     VecFpuOp2::Sub => "xvsub",
                     VecFpuOp2::Mul => "xvmul",
                     VecFpuOp2::Div => "xvdiv",
+                    VecFpuOp2::CmpEq => "xvcmpeq",
+                    VecFpuOp2::CmpGt => "xvcmpgt",
+                    VecFpuOp2::CmpGe => "xvcmpge",
                 };
                 let sfx = if ty.lane_bits() == 32 { "sp" } else { "dp" };
                 format!(

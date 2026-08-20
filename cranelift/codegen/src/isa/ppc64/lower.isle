@@ -454,7 +454,12 @@
 
 ;;;; Rules for `fcmp` ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(rule (lower (fcmp _ cc x y))
+;; Note that `fcmp`'s controlling type is the *result* -- `i8` for a
+;; scalar compare, a lane-mask vector for a vector one -- so the guard
+;; that keeps this rule off vector comparisons has to name the operand
+;; type. Without it, vector registers reached this scalar compare and
+;; tripped regalloc2's register-class assertion.
+(rule (lower (fcmp _ cc x @ (value_type (ty_scalar_float _)) y))
   (output_reg (fpu_cmp_set (float_compare cc (put_in_reg x) (put_in_reg y)))))
 
 ;;;; Rules for `select_spectre_guard` ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1563,3 +1568,100 @@
   (output_reg (vec_fpu_rr (VecFpuOp1.Neg) (put_in_reg x) ty)))
 (rule 2 (lower (fabs (ty_vec128 ty) x))
   (output_reg (vec_fpu_rr (VecFpuOp1.Abs) (put_in_reg x) ty)))
+
+;;;; Vector floating-point comparisons ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; The hardware provides ordered equal, greater-than and
+;; greater-or-equal; each is false when either operand is NaN. The
+;; unordered-aware conditions come from complementing (CLIF's
+;; `NotEqual` is "unordered or not equal", so it is exactly the
+;; complement of ordered equality) and from swapping operands to turn
+;; `>` into `<`.
+
+(decl vec_fcmp (VecFpuOp2 Value Value Type) Reg)
+(rule (vec_fcmp op x y ty)
+  (vec_fpu_rrr op (put_in_reg x) (put_in_reg y) ty))
+
+(rule 2 (lower (fcmp _ (FloatCC.Equal) x @ (value_type (ty_vec128 ty)) y))
+  (output_reg (vec_fcmp (VecFpuOp2.CmpEq) x y ty)))
+
+(rule 2 (lower (fcmp _ (FloatCC.NotEqual) x @ (value_type (ty_vec128 ty)) y))
+  (output_reg (vec_not (vec_fcmp (VecFpuOp2.CmpEq) x y ty) ty)))
+
+(rule 2 (lower (fcmp _ (FloatCC.GreaterThan) x @ (value_type (ty_vec128 ty)) y))
+  (output_reg (vec_fcmp (VecFpuOp2.CmpGt) x y ty)))
+
+(rule 2 (lower (fcmp _ (FloatCC.GreaterThanOrEqual) x @ (value_type (ty_vec128 ty)) y))
+  (output_reg (vec_fcmp (VecFpuOp2.CmpGe) x y ty)))
+
+(rule 2 (lower (fcmp _ (FloatCC.LessThan) x @ (value_type (ty_vec128 ty)) y))
+  (output_reg (vec_fcmp (VecFpuOp2.CmpGt) y x ty)))
+
+(rule 2 (lower (fcmp _ (FloatCC.LessThanOrEqual) x @ (value_type (ty_vec128 ty)) y))
+  (output_reg (vec_fcmp (VecFpuOp2.CmpGe) y x ty)))
+
+;; A value is ordered exactly when it equals itself, so a pair is
+;; ordered when both self-comparisons hold -- and unordered when they
+;; do not *both* hold. That is a NAND, not a NOR: with one NaN and one
+;; normal operand the two differ, and only the NAND is right.
+(decl vec_ford (Value Value Type) Reg)
+(rule (vec_ford x y ty)
+  (vec_alu_rrr (VecAluOp.And)
+               (vec_fcmp (VecFpuOp2.CmpEq) x x ty)
+               (vec_fcmp (VecFpuOp2.CmpEq) y y ty)
+               ty))
+
+(rule 2 (lower (fcmp _ (FloatCC.Ordered) x @ (value_type (ty_vec128 ty)) y))
+  (output_reg (vec_ford x y ty)))
+
+(rule 2 (lower (fcmp _ (FloatCC.Unordered) x @ (value_type (ty_vec128 ty)) y))
+  (output_reg (vec_not (vec_ford x y ty) ty)))
+
+;; The remaining conditions are the unordered-tolerant counterparts of
+;; the strict ones. Since every hardware compare is false when either
+;; operand is NaN, complementing a strict compare yields exactly
+;; "unordered or the opposite", which is what CLIF's `Unordered*`
+;; conditions mean.
+(rule 2 (lower (fcmp _ (FloatCC.UnorderedOrLessThan) x @ (value_type (ty_vec128 ty)) y))
+  (output_reg (vec_not (vec_fcmp (VecFpuOp2.CmpGe) x y ty) ty)))
+
+(rule 2 (lower (fcmp _ (FloatCC.UnorderedOrLessThanOrEqual) x @ (value_type (ty_vec128 ty)) y))
+  (output_reg (vec_not (vec_fcmp (VecFpuOp2.CmpGt) x y ty) ty)))
+
+(rule 2 (lower (fcmp _ (FloatCC.UnorderedOrGreaterThan) x @ (value_type (ty_vec128 ty)) y))
+  (output_reg (vec_not (vec_fcmp (VecFpuOp2.CmpGe) y x ty) ty)))
+
+(rule 2 (lower (fcmp _ (FloatCC.UnorderedOrGreaterThanOrEqual) x @ (value_type (ty_vec128 ty)) y))
+  (output_reg (vec_not (vec_fcmp (VecFpuOp2.CmpGt) y x ty) ty)))
+
+;; Equality that tolerates NaN, and its strict-ordered complement:
+;; neither operand greater means equal-or-unordered, and either one
+;; greater means ordered-and-unequal.
+(rule 2 (lower (fcmp _ (FloatCC.UnorderedOrEqual) x @ (value_type (ty_vec128 ty)) y))
+  (output_reg (vec_alu_rrr (VecAluOp.Nor)
+                           (vec_fcmp (VecFpuOp2.CmpGt) x y ty)
+                           (vec_fcmp (VecFpuOp2.CmpGt) y x ty)
+                           ty)))
+
+(rule 2 (lower (fcmp _ (FloatCC.OrderedNotEqual) x @ (value_type (ty_vec128 ty)) y))
+  (output_reg (vec_alu_rrr (VecAluOp.Or)
+                           (vec_fcmp (VecFpuOp2.CmpGt) x y ty)
+                           (vec_fcmp (VecFpuOp2.CmpGt) y x ty)
+                           ty)))
+
+;;;; Vector `iabs` ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; No vector absolute-value instruction exists: take the signed maximum
+;; of the value and its negation. This gives CLIF's wrapping behaviour
+;; for the most negative lane value for free, since negating it yields
+;; itself and the maximum is then also itself.
+
+(rule 2 (lower (iabs (ty_vec128 ty) x))
+  (let ((xr Reg (put_in_reg x))
+        (neg Reg (vec_alu_rrr (VecAluOp.Sub) (vec_zero) xr ty)))
+    (output_reg (vec_alu_rrr (VecAluOp.MaxS) xr neg ty))))
+
+;;;; Vector rounding average ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(rule (lower (avg_round (ty_vec128 ty) x y))
+  (output_reg (vec_alu_rrr (VecAluOp.AvgRoundU) (put_in_reg x) (put_in_reg y) ty)))

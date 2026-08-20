@@ -13,6 +13,7 @@ target pulley32
 target pulley32be
 target pulley64
 target pulley64be
+target powerpc64le
 
 
 function %sqrt_f32x4(f32x4) -> f32x4 {

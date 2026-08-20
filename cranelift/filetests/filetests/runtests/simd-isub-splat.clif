@@ -12,6 +12,7 @@ target pulley32
 target pulley32be
 target pulley64
 target pulley64be
+target powerpc64le
 
 
 function %isub_splat_reverse_i8x16(i8x16, i8) -> i8x16 {

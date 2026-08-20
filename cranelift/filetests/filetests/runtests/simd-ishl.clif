@@ -11,6 +11,7 @@ target pulley32
 target pulley32be
 target pulley64
 target pulley64be
+target powerpc64le
 
 
 function %ishl_i8x16(i8x16, i32) -> i8x16 {

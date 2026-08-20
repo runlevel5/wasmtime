@@ -149,6 +149,9 @@ fn vx_xo(op: VecAluOp, ty: Type) -> u32 {
         64 => 3,
         _ => unreachable!("vector lane width {ty}"),
     };
+    if matches!(op, VecAluOp::AvgRoundS | VecAluOp::AvgRoundU) {
+        assert_ne!(lane, 64, "the ISA has no doubleword vector average");
+    }
     let table: [u32; 4] = match op {
         VecAluOp::Add => [0, 64, 128, 192],
         VecAluOp::Sub => [1024, 1088, 1152, 1216],
@@ -162,6 +165,9 @@ fn vx_xo(op: VecAluOp, ty: Type) -> u32 {
         VecAluOp::Shl => [260, 324, 388, 1476],
         VecAluOp::ShrU => [516, 580, 644, 1732],
         VecAluOp::ShrS => [772, 836, 900, 964],
+        // No doubleword average exists; the lowering rules never ask.
+        VecAluOp::AvgRoundS => [1282, 1346, 1410, 0],
+        VecAluOp::AvgRoundU => [1026, 1090, 1154, 0],
         VecAluOp::And | VecAluOp::Or | VecAluOp::Xor | VecAluOp::Nor => {
             unreachable!("{op:?} is emitted as a VSX logical, not a VX form")
         }
@@ -1622,6 +1628,12 @@ impl MachInstEmit for Inst {
                     (VecFpuOp2::Mul, false) => 112,
                     (VecFpuOp2::Div, true) => 88,
                     (VecFpuOp2::Div, false) => 120,
+                    (VecFpuOp2::CmpEq, true) => 67,
+                    (VecFpuOp2::CmpEq, false) => 99,
+                    (VecFpuOp2::CmpGt, true) => 75,
+                    (VecFpuOp2::CmpGt, false) => 107,
+                    (VecFpuOp2::CmpGe, true) => 83,
+                    (VecFpuOp2::CmpGe, false) => 115,
                 };
                 sink.put4(enc_xx3(
                     vsr_num(rd.to_reg()),
