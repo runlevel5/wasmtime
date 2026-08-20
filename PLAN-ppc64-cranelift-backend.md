@@ -785,9 +785,30 @@ sweep "passed" 68 files locally of which only 39 actually work). And
 finding the cases one would not think to write: i128 shift amounts,
 NaN-versus-normal comparison pairs.
 
-Still unimplemented, blocking further upstream tests: `vall_true` /
-`vany_true` (needs CR6 reading -- the backend only uses cr0 so far,
-so this is a small design step), lane extract/insert, 64-bit vector
+#### Batch 3 (2026-08-20): lane reductions, and the first CR6 use
+
+`vall_true`/`vany_true` need the record form of the equality compare,
+whose CR6 summary answers both questions against a zero vector: EQ set
+means no lane is zero (all non-zero), LT set means every lane is zero.
+This is the first condition-register field other than cr0 the backend
+touches, and it keeps the same invariant -- the zero, the record-form
+compare and the `isel` are one MInst, so no CR field is ever visible to
+regalloc.
+
+The compare **must** use the value's own lane width: a 32-bit lane
+holding 1 is non-zero yet contains three zero bytes, so a byte-wise
+test answers `vall_true` wrongly. Naive all-ones test inputs pass
+either way, so the runtest pins the hazard explicitly at each width
+(e.g. `[0x01000000 0x00010000 0x00000100 0x00000001]`).
+
+Batch 3 needed no fixes, against four in batch 2. The difference was
+deriving the CR6 bit semantics and the lane-width requirement *before*
+writing the emit code, and encoding the hazard into the test rather
+than discovering it afterwards. 46 upstream `simd-*.clif` runtests now
+execute on hardware.
+
+Still unimplemented, blocking further upstream tests: lane
+extract/insert, 64-bit vector
 types (`i8x8`, `i32x2`, `f32x2`), `bitcast` to `i128`, widening and
 narrowing, `shuffle`/`swizzle`, saturating arithmetic, `fmin`/`fmax`
 (the wasm NaN semantics need checking against `xvmin`/`xvmax`
