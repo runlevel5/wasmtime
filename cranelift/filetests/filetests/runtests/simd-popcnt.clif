@@ -13,6 +13,7 @@ target pulley32
 target pulley32be
 target pulley64
 target pulley64be
+target powerpc64le
 
 function %popcnt_i8x16(i8x16) -> i8x16 {
 block0(v0: i8x16):

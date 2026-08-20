@@ -4,6 +4,7 @@ target s390x
 set enable_multi_ret_implicit_sret
 target riscv64 has_v
 target riscv64 has_v has_c has_zcb
+target powerpc64le
 
 ;; This file contains tests for the popcnt instruction with element sizes larger than i8.
 ;; X86 does not support these yet, but we should merge this with the main file once it does.

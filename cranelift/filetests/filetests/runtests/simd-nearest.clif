@@ -13,6 +13,7 @@ target pulley32
 target pulley32be
 target pulley64
 target pulley64be
+target powerpc64le
 
 function %nearest_f32x4(f32x4) -> f32x4 {
 block0(v0: f32x4):

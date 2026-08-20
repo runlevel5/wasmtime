@@ -149,8 +149,19 @@ fn vx_xo(op: VecAluOp, ty: Type) -> u32 {
         64 => 3,
         _ => unreachable!("vector lane width {ty}"),
     };
-    if matches!(op, VecAluOp::AvgRoundS | VecAluOp::AvgRoundU) {
-        assert_ne!(lane, 64, "the ISA has no doubleword vector average");
+    if matches!(
+        op,
+        VecAluOp::AvgRoundS
+            | VecAluOp::AvgRoundU
+            | VecAluOp::SAddSat
+            | VecAluOp::UAddSat
+            | VecAluOp::SSubSat
+            | VecAluOp::USubSat
+    ) {
+        assert_ne!(
+            lane, 64,
+            "the ISA has no doubleword vector average or saturating arithmetic"
+        );
     }
     let table: [u32; 4] = match op {
         VecAluOp::Add => [0, 64, 128, 192],
@@ -168,6 +179,11 @@ fn vx_xo(op: VecAluOp, ty: Type) -> u32 {
         // No doubleword average exists; the lowering rules never ask.
         VecAluOp::AvgRoundS => [1282, 1346, 1410, 0],
         VecAluOp::AvgRoundU => [1026, 1090, 1154, 0],
+        // Likewise no doubleword saturating arithmetic exists.
+        VecAluOp::SAddSat => [768, 832, 896, 0],
+        VecAluOp::UAddSat => [512, 576, 640, 0],
+        VecAluOp::SSubSat => [1792, 1856, 1920, 0],
+        VecAluOp::USubSat => [1536, 1600, 1664, 0],
         VecAluOp::And | VecAluOp::Or | VecAluOp::Xor | VecAluOp::Nor => {
             unreachable!("{op:?} is emitted as a VSX logical, not a VX form")
         }
@@ -1708,6 +1724,39 @@ impl MachInstEmit for Inst {
                     sink.put4(enc_vsx_x(dst, 0, 0, 844)); // lxvd2x
                     sink.put4(enc_xxpermdi(dst, dst, dst, 2)); // xxswapd
                 }
+            }
+
+            &Inst::VecUnary { op, rd, rn, ty } => {
+                let xo = match op {
+                    VecUnaryOp::Popcnt => match ty.lane_bits() {
+                        8 => 1795,
+                        16 => 1859,
+                        32 => 1923,
+                        64 => 1987,
+                        _ => unreachable!("vector lane width {ty}"),
+                    },
+                };
+                sink.put4(enc_vx(
+                    vsr_num(rd.to_reg()) - 32,
+                    0,
+                    vsr_num(rn) - 32,
+                    xo,
+                ));
+            }
+
+            &Inst::VecRound { rd, rn, mode, ty } => {
+                let single = ty.lane_bits() == 32;
+                let xo = match (mode, single) {
+                    (FpuRoundMode::Ceil, true) => 169,
+                    (FpuRoundMode::Ceil, false) => 233,
+                    (FpuRoundMode::Floor, true) => 185,
+                    (FpuRoundMode::Floor, false) => 249,
+                    (FpuRoundMode::Trunc, true) => 153,
+                    (FpuRoundMode::Trunc, false) => 217,
+                    (FpuRoundMode::Nearest, true) => 171,
+                    (FpuRoundMode::Nearest, false) => 235,
+                };
+                sink.put4(enc_xx2(vsr_num(rd.to_reg()), vsr_num(rn), xo));
             }
 
             &Inst::VecSel {

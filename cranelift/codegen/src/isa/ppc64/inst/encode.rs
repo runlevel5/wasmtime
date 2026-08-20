@@ -382,6 +382,19 @@ mod tests {
         assert_eq!(enc_vx(2, 3, 4, 1346), 0x1043_2542); // vavgsh
         assert_eq!(enc_vx(2, 3, 4, 1410), 0x1043_2582); // vavgsw
         assert_eq!(enc_xxsel(34, 35, 36, 37), 0xF043_217F); // xxsel
+        assert_eq!(enc_vx(2, 3, 4, 768), 0x1043_2300); // vaddsbs
+        assert_eq!(enc_vx(2, 3, 4, 896), 0x1043_2380); // vaddsws
+        assert_eq!(enc_vx(2, 3, 4, 512), 0x1043_2200); // vaddubs
+        assert_eq!(enc_vx(2, 3, 4, 1792), 0x1043_2700); // vsubsbs
+        assert_eq!(enc_vx(2, 3, 4, 1536), 0x1043_2600); // vsububs
+        assert_eq!(enc_vx(2, 0, 3, 1795), 0x1040_1F03); // vpopcntb
+        assert_eq!(enc_vx(2, 0, 3, 1987), 0x1040_1FC3); // vpopcntd
+        assert_eq!(enc_xx2(34, 35, 169), 0xF040_1AA7); // xvrspip
+        assert_eq!(enc_xx2(34, 35, 185), 0xF040_1AE7); // xvrspim
+        assert_eq!(enc_xx2(34, 35, 153), 0xF040_1A67); // xvrspiz
+        assert_eq!(enc_xx2(34, 35, 171), 0xF040_1AAF); // xvrspic
+        assert_eq!(enc_xx2(34, 35, 233), 0xF040_1BA7); // xvrdpip
+        assert_eq!(enc_xx2(34, 35, 235), 0xF040_1BAF); // xvrdpic
         // Shift-by-immediate forms, all verified against llvm-mc.
         assert_eq!(enc_md(4, 3, 7, 56, 1), 0x7883_3E24); // sldi r3, r4, 7
         assert_eq!(enc_md(4, 3, 57, 7, 0), 0x7883_C9C2); // srdi r3, r4, 7

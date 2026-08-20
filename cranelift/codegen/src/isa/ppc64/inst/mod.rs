@@ -30,7 +30,7 @@ use crate::isa::ppc64::abi::Ppc64MachineDeps;
 
 pub use crate::isa::ppc64::lower::isle::generated_code::{
     AluImmOp, AluOp, BitOp, DivOp, FpuOp1, FpuOp2, FpuRoundMode, LoadOP, MInst as Inst, ShiftOp,
-    StoreOP, VecAluOp, VecFpuOp1, VecFpuOp2,
+    StoreOP, VecAluOp, VecFpuOp1, VecFpuOp2, VecUnaryOp,
     UnaryOp,
 };
 
@@ -207,6 +207,10 @@ fn ppc64_get_operands(inst: &mut Inst, collector: &mut impl OperandVisitor) {
         Inst::VecInsertLane { rd, rv, rs, .. } => {
             collector.reg_use(rv);
             collector.reg_use(rs);
+            collector.reg_def(rd);
+        }
+        Inst::VecUnary { rd, rn, .. } | Inst::VecRound { rd, rn, .. } => {
+            collector.reg_use(rn);
             collector.reg_def(rd);
         }
         Inst::VecSel {
@@ -995,6 +999,10 @@ impl Inst {
                     VecAluOp::ShrS => "vsra",
                     VecAluOp::AvgRoundS => "vavgs",
                     VecAluOp::AvgRoundU => "vavgu",
+                    VecAluOp::SAddSat => "vaddsat_s",
+                    VecAluOp::UAddSat => "vaddsat_u",
+                    VecAluOp::SSubSat => "vsubsat_s",
+                    VecAluOp::USubSat => "vsubsat_u",
                     VecAluOp::And => "xxland",
                     VecAluOp::Or => "xxlor",
                     VecAluOp::Xor => "xxlxor",
@@ -1036,6 +1044,22 @@ impl Inst {
                     reg(*rv),
                     reg(*rs)
                 )
+            }
+            Inst::VecUnary { op, rd, rn, ty } => {
+                let mnemonic = match op {
+                    VecUnaryOp::Popcnt => "vpopcnt",
+                };
+                format!("{mnemonic}{} {}, {}", ty.lane_bits(), wreg(*rd), reg(*rn))
+            }
+            Inst::VecRound { rd, rn, mode, ty } => {
+                let m = match mode {
+                    FpuRoundMode::Ceil => "ip",
+                    FpuRoundMode::Floor => "im",
+                    FpuRoundMode::Trunc => "iz",
+                    FpuRoundMode::Nearest => "ic",
+                };
+                let sfx = if ty.lane_bits() == 32 { "sp" } else { "dp" };
+                format!("xvr{sfx}{m} {}, {}", wreg(*rd), reg(*rn))
             }
             Inst::VecSel {
                 rd,

@@ -1664,6 +1664,7 @@
 ;;;; Vector rounding average ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (rule (lower (avg_round (ty_vec128 ty) x y))
+  (if-let true (vec_lanes_under_64 ty))
   (output_reg (vec_alu_rrr (VecAluOp.AvgRoundU) (put_in_reg x) (put_in_reg y) ty)))
 
 ;;;; Vector lane reductions ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1700,3 +1701,30 @@
 ;; Vector bitselect is a single `xxsel`.
 (rule 2 (lower (bitselect (ty_vec128 _) mask x y))
   (output_reg (vec_sel (put_in_reg x) (put_in_reg y) (put_in_reg mask))))
+
+;;;; Vector saturating arithmetic, popcnt and rounding ;;;;;;;;;;;;;;;;;;;;;;;
+
+(rule (lower (sadd_sat (ty_vec128 ty) x y))
+  (if-let true (vec_lanes_under_64 ty))
+  (output_reg (vec_alu_rrr (VecAluOp.SAddSat) (put_in_reg x) (put_in_reg y) ty)))
+(rule (lower (uadd_sat (ty_vec128 ty) x y))
+  (if-let true (vec_lanes_under_64 ty))
+  (output_reg (vec_alu_rrr (VecAluOp.UAddSat) (put_in_reg x) (put_in_reg y) ty)))
+(rule (lower (ssub_sat (ty_vec128 ty) x y))
+  (if-let true (vec_lanes_under_64 ty))
+  (output_reg (vec_alu_rrr (VecAluOp.SSubSat) (put_in_reg x) (put_in_reg y) ty)))
+(rule (lower (usub_sat (ty_vec128 ty) x y))
+  (if-let true (vec_lanes_under_64 ty))
+  (output_reg (vec_alu_rrr (VecAluOp.USubSat) (put_in_reg x) (put_in_reg y) ty)))
+
+(rule 3 (lower (popcnt (ty_vec128 ty) x))
+  (output_reg (vec_unary (VecUnaryOp.Popcnt) (put_in_reg x) ty)))
+
+(rule 2 (lower (ceil (ty_vec128 ty) x))
+  (output_reg (vec_round (FpuRoundMode.Ceil) (put_in_reg x) ty)))
+(rule 2 (lower (floor (ty_vec128 ty) x))
+  (output_reg (vec_round (FpuRoundMode.Floor) (put_in_reg x) ty)))
+(rule 2 (lower (trunc (ty_vec128 ty) x))
+  (output_reg (vec_round (FpuRoundMode.Trunc) (put_in_reg x) ty)))
+(rule 2 (lower (nearest (ty_vec128 ty) x))
+  (output_reg (vec_round (FpuRoundMode.Nearest) (put_in_reg x) ty)))

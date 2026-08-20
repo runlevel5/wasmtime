@@ -222,6 +222,16 @@ impl generated_code::Context for Ppc64IsleContext<'_, '_, MInst, Ppc64Backend> {
         i16::try_from(i64::from(imm)).ok().map(|i| i as u16)
     }
 
+    /// Whether a vector type's lanes are narrower than a doubleword.
+    /// The saturating arithmetic and averaging instructions exist only
+    /// for bytes, halfwords and words, so their rules must not match a
+    /// 64-bit-lane type: without this the emitter's guard would fire as
+    /// a panic instead of the backend reporting the operation
+    /// unsupported.
+    fn vec_lanes_under_64(&mut self, ty: Type) -> bool {
+        ty.lane_bits() < 64
+    }
+
     fn vconst_lo64(&mut self, n: u128) -> u64 {
         n as u64
     }

@@ -165,6 +165,19 @@
     ;; the ISA has no doubleword average, and neither proposal needs one.
     (AvgRoundS)
     (AvgRoundU)
+    ;; Saturating add and subtract. Byte, halfword and word only: the
+    ;; ISA has no doubleword saturating arithmetic, and neither CLIF's
+    ;; users nor wasm need one.
+    (SAddSat)
+    (UAddSat)
+    (SSubSat)
+    (USubSat)
+))
+
+;; Single-operand lane operations in VX form (RA field zero).
+(type VecUnaryOp
+  (enum
+    (Popcnt)
 ))
 
 ;; Floating-point lane arithmetic; the lane type selects between the
@@ -399,6 +412,23 @@
       (rs Reg)
       (ty Type)
       (lane u8))
+
+    ;; Single-operand lane operation.
+    (VecUnary
+      (op VecUnaryOp)
+      (rd WritableReg)
+      (rn Reg)
+      (ty Type))
+
+    ;; Round float lanes to integral values. As for the scalar case,
+    ;; `nearest` needs ties-to-even, which the `xvr*ic` forms give by
+    ;; rounding in the current FPSCR mode; the plain `xvr*i` forms
+    ;; round ties away from zero and cannot implement it.
+    (VecRound
+      (rd WritableReg)
+      (rn Reg)
+      (mode FpuRoundMode)
+      (ty Type))
 
     ;; Bitwise select (`xxsel`): each result bit comes from `if_set`
     ;; where the mask bit is set, `if_clear` where it is clear.
@@ -1004,6 +1034,18 @@
         (_ Unit (emit (MInst.VecInsertLane dst rv rs ty lane))))
     dst))
 
+(decl vec_unary (VecUnaryOp Reg Type) Reg)
+(rule (vec_unary op rn ty)
+  (let ((dst WritableReg (temp_writable_reg $I8X16))
+        (_ Unit (emit (MInst.VecUnary op dst rn ty))))
+    dst))
+
+(decl vec_round (FpuRoundMode Reg Type) Reg)
+(rule (vec_round mode rn ty)
+  (let ((dst WritableReg (temp_writable_reg $I8X16))
+        (_ Unit (emit (MInst.VecRound dst rn mode ty))))
+    dst))
+
 (decl vec_sel (Reg Reg Reg) Reg)
 (rule (vec_sel if_set if_clear mask)
   (let ((dst WritableReg (temp_writable_reg $I8X16))
@@ -1081,6 +1123,9 @@
     dst))
 
 ;; Split a 128-bit constant for materialization through the GPRs.
+(decl pure vec_lanes_under_64 (Type) bool)
+(extern constructor vec_lanes_under_64 vec_lanes_under_64)
+
 (decl pure vconst_lo64 (u128) u64)
 (extern constructor vconst_lo64 vconst_lo64)
 (decl pure vconst_hi64 (u128) u64)
