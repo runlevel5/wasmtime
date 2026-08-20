@@ -842,6 +842,30 @@ it dissolved rather than materialised:
   64-bit ISA) -- inapplicable, not gaps. 53 upstream `simd-*.clif`
   files now execute on hardware.
 
+#### Batch 5 (2026-08-20): saturating arithmetic, popcnt, rounding
+
+Direct instruction mappings, plus one design correction worth keeping:
+
+- Saturating add/sub exist for b/h/w only. The first cut relied on a
+  poisoned opcode table, which turned an `i64x2` saturating add into an
+  **emit-time panic** rather than a clean `Unsupported`. Panics read as
+  compiler bugs and kill the process; `Unsupported` is a signal callers
+  can act on. The rules now carry a `vec_lanes_under_64` guard and the
+  assertion is demoted to a backstop. Generalisable: an unsupported
+  operation must be declined at *lowering*, never asserted at emission.
+- Vector `popcnt` at all four widths; needed the single-operand VX
+  form, which the unpack instructions will reuse for widening.
+- Rounding: the scalar `nearest` lesson transferred directly. Plain
+  `xvr{sp,dp}i` rounds ties *away from zero* and cannot implement
+  `nearest`, exactly as `frin` could not; the `xvr*ic` current-mode
+  forms give ties-to-even. Picked correctly first time because the
+  earlier trap was written down.
+- 11 more upstream runtests, including `simd-arithmetic` (broad
+  coverage, blocked only on `sadd_sat`). 64 now execute on hardware.
+
+Note: POWER9's `/tmp` is quota-exhausted; scratch files must go in
+`~/tmp` there.
+
 Still unimplemented, blocking further upstream tests: 64-bit vector
 types (`i8x8`, `i32x2`, `f32x2`), `bitcast` to `i128`, widening and
 narrowing, `shuffle`/`swizzle`, saturating arithmetic, `fmin`/`fmax`
