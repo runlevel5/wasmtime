@@ -200,6 +200,10 @@ fn ppc64_get_operands(inst: &mut Inst, collector: &mut impl OperandVisitor) {
             collector.reg_use(rb);
             collector.reg_def(rd);
         }
+        Inst::VecTestLanes { rd, rn, .. } => {
+            collector.reg_use(rn);
+            collector.reg_def(rd);
+        }
         Inst::VecFpuRRR { rd, ra, rb, .. } => {
             collector.reg_use(ra);
             collector.reg_use(rb);
@@ -988,6 +992,15 @@ impl Inst {
                         reg(*rb)
                     ),
                 }
+            }
+            Inst::VecTestLanes { rd, rn, ty, all } => {
+                let kind = if *all { "all" } else { "any" };
+                format!(
+                    "vec_{kind}_true{} {}, {}",
+                    ty.lane_bits(),
+                    wreg(*rd),
+                    reg(*rn)
+                )
             }
             Inst::VecFpuRRR { op, rd, ra, rb, ty } => {
                 let mnemonic = match op {

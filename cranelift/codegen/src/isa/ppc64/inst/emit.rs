@@ -1617,6 +1617,29 @@ impl MachInstEmit for Inst {
                 sink.put4(word);
             }
 
+            &Inst::VecTestLanes { rd, rn, ty, all } => {
+                // xxlxor v0, v0, v0        ; the scratch holds zero
+                // vcmpequX. v0, rn, v0     ; sets CR6, result discarded
+                // li rd, 1
+                // all: li r0, 0 ; isel rd, rd, r0, CR6_EQ
+                // any:            isel rd, 0,  rd, CR6_LT
+                let rd_n = reg_num(rd.to_reg());
+                let rn_v = vsr_num(rn) - 32;
+                let scratch = VEC_SCRATCH; // v0, as a 6-bit VSR number
+                let scratch_v = scratch - 32;
+                sink.put4(enc_xx3(scratch, scratch, scratch, 154)); // xxlxor
+                // The record form is the plain opcode plus 1024.
+                let xo = vx_xo(VecAluOp::CmpEq, ty) + 1024;
+                sink.put4(enc_vx(scratch_v, rn_v, scratch_v, xo));
+                sink.put4(enc_d(14, rd_n, 0, 1)); // li rd, 1
+                if all {
+                    sink.put4(enc_d(14, 0, 0, 0)); // li r0, 0
+                    sink.put4(enc_isel(rd_n, rd_n, 0, CR6_EQ));
+                } else {
+                    sink.put4(enc_isel(rd_n, 0, rd_n, CR6_LT));
+                }
+            }
+
             &Inst::VecFpuRRR { op, rd, ra, rb, ty } => {
                 let single = ty.lane_bits() == 32;
                 let xo = match (op, single) {

@@ -102,6 +102,11 @@ pub(crate) const CR0_LT: u32 = 0;
 pub(crate) const CR0_GT: u32 = 1;
 pub(crate) const CR0_EQ: u32 = 2;
 
+/// cr6 bit indices. `vcmpequ*.` reports "every element compared equal"
+/// in LT and "no element compared equal" in EQ.
+pub(crate) const CR6_LT: u32 = 24;
+pub(crate) const CR6_EQ: u32 = 26;
+
 impl IntegerCompare {
     /// Is this a signed comparison (`cmp`) as opposed to logical (`cmpl`)?
     pub(crate) fn is_signed(&self) -> bool {

@@ -1,0 +1,69 @@
+test interpret
+test run
+target powerpc64le
+target powerpc64le has_isa_3_0
+
+function %all_i8x16(i8x16) -> i8 {
+block0(v0: i8x16):
+    v1 = vall_true v0
+    return v1
+}
+; run: %all_i8x16([1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1]) == 1
+; run: %all_i8x16([1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 0]) == 0
+; run: %all_i8x16([0 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1]) == 0
+; run: %all_i8x16([0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0]) == 0
+
+function %any_i8x16(i8x16) -> i8 {
+block0(v0: i8x16):
+    v1 = vany_true v0
+    return v1
+}
+; run: %any_i8x16([0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0]) == 0
+; run: %any_i8x16([0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1]) == 1
+; run: %any_i8x16([1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0]) == 1
+
+function %all_i32x4(i32x4) -> i8 {
+block0(v0: i32x4):
+    v1 = vall_true v0
+    return v1
+}
+; run: %all_i32x4([1 1 1 1]) == 1
+; run: %all_i32x4([1 1 1 0]) == 0
+; run: %all_i32x4([0x01000000 0x00010000 0x00000100 0x00000001]) == 1
+; run: %all_i32x4([-1 -1 -1 -1]) == 1
+
+function %any_i32x4(i32x4) -> i8 {
+block0(v0: i32x4):
+    v1 = vany_true v0
+    return v1
+}
+; run: %any_i32x4([0 0 0 0]) == 0
+; run: %any_i32x4([0 0 0 1]) == 1
+; run: %any_i32x4([0x00000100 0 0 0]) == 1
+
+function %all_i16x8(i16x8) -> i8 {
+block0(v0: i16x8):
+    v1 = vall_true v0
+    return v1
+}
+; run: %all_i16x8([1 1 1 1 1 1 1 1]) == 1
+; run: %all_i16x8([0x0100 0x0100 0x0100 0x0100 0x0100 0x0100 0x0100 0x0100]) == 1
+; run: %all_i16x8([1 1 1 1 1 1 1 0]) == 0
+
+function %all_i64x2(i64x2) -> i8 {
+block0(v0: i64x2):
+    v1 = vall_true v0
+    return v1
+}
+; run: %all_i64x2([1 1]) == 1
+; run: %all_i64x2([1 0]) == 0
+; run: %all_i64x2([0 1]) == 0
+; run: %all_i64x2([0x0000000100000000 0x0000000000000001]) == 1
+
+function %any_i64x2(i64x2) -> i8 {
+block0(v0: i64x2):
+    v1 = vany_true v0
+    return v1
+}
+; run: %any_i64x2([0 0]) == 0
+; run: %any_i64x2([0 0x0000000100000000]) == 1

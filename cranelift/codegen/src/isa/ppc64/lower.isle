@@ -1665,3 +1665,11 @@
 
 (rule (lower (avg_round (ty_vec128 ty) x y))
   (output_reg (vec_alu_rrr (VecAluOp.AvgRoundU) (put_in_reg x) (put_in_reg y) ty)))
+
+;;;; Vector lane reductions ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(rule 1 (lower (vall_true _ x @ (value_type (ty_vec128 ty))))
+  (output_reg (vec_test_lanes (put_in_reg x) ty true)))
+
+(rule 1 (lower (vany_true _ x @ (value_type (ty_vec128 ty))))
+  (output_reg (vec_test_lanes (put_in_reg x) ty false)))

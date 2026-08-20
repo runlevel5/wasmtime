@@ -363,6 +363,21 @@
       (rb Reg)
       (ty Type))
 
+    ;; Reduce a vector to a 0/1 GPR: whether all lanes, or any lane, is
+    ;; non-zero. The record form of the equality compare sets CR6, whose
+    ;; EQ bit means "no lane compared equal" (so every lane is non-zero)
+    ;; and whose LT bit means "every lane compared equal" (so no lane
+    ;; is). CR6 is read by the `isel` inside this same expansion, which
+    ;; keeps condition-register use entirely local, exactly as the cr0
+    ;; sequences do. The comparison must use the value's own lane width:
+    ;; a 32-bit lane holding 1 is non-zero yet contains three zero
+    ;; bytes, so a byte-wise test would answer `vall_true` wrongly.
+    (VecTestLanes
+      (rd WritableReg)
+      (rn Reg)
+      (ty Type)
+      (all bool))
+
     ;; Floating-point lane arithmetic.
     (VecFpuRRR
       (op VecFpuOp2)
@@ -924,6 +939,12 @@
 (rule (vec_alu_rrr op a b ty)
   (let ((dst WritableReg (temp_writable_reg $I8X16))
         (_ Unit (emit (MInst.VecAluRRR op dst a b ty))))
+    dst))
+
+(decl vec_test_lanes (Reg Type bool) Reg)
+(rule (vec_test_lanes rn ty all)
+  (let ((dst WritableReg (temp_writable_reg $I64))
+        (_ Unit (emit (MInst.VecTestLanes dst rn ty all))))
     dst))
 
 (decl vec_fpu_rrr (VecFpuOp2 Reg Reg Type) Reg)
