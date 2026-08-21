@@ -894,6 +894,38 @@ lowering per the batch-5 rule.
 widen with a high widen in one expression. 83 upstream runtests now
 execute on hardware.
 
+#### Batches 7-8 (2026-08-21): integer multiply
+
+Per-lane forms first (`vmladduhm` for i16x8, `vmuluwm` for i32x4,
+`vmhraddshs` for `sqmul_round_sat` -- which computes
+`sat((a*b + 0x4000) >> 15) + c`, exactly the Q15 op at c = 0), then
+doubleword multiply built from 32-bit halves.
+
+**The even/odd mnemonics invert too.** `vmuleub`'s result lane k takes
+LE byte lanes 2k+1, so the instruction named "even" works on LE-*odd*
+lanes; likewise `vmulouw` ("odd") multiplies the even LE word lanes,
+which are a doubleword's *low* halves -- which is precisely why it
+supplies `al*bl` for the i64x2 decomposition
+`a*b == al*bl + (al*bh + ah*bl) * 2^32`. Nine vector instructions,
+nothing leaving vector registers. Derivations sit beside the rules:
+someone trusting the mnemonics would file bugs against correct code.
+
+Testing note that generalises to any *composed* lowering: the runtest
+must exercise each **term**, not just plausible results. A rule
+computing only `al*bl` still gets `3*7` right. So the cases are 2^32
+squared (all terms vanish -> 0), (2^32+1) squared (both cross products
+live), all-ones squared (every term maximal, wraps to 1), and
+asymmetric operands where transposing the cross products would show.
+
+Also: `vspltisw`'s immediate only reaches 15, so a splatted 32 must
+come through the scalar-to-vector path.
+
+Deferred deliberately: `i8x16` imul (needs a `vperm` interleave of the
+even/odd products, and **wasm has no `i8x16.mul`** -- it was removed
+from the proposal, so this is CLIF completeness with no wasm traffic)
+and the `umulhi`/`smulhi` family, which reuses the same even/odd
+derivation.
+
 Still unimplemented, blocking further upstream tests: 64-bit vector
 types (`i8x8`, `i32x2`, `f32x2`), `bitcast` to `i128`, widening and
 narrowing, `shuffle`/`swizzle`, saturating arithmetic, `fmin`/`fmax`
