@@ -151,6 +151,15 @@ fn vx_xo(op: VecAluOp, ty: Type) -> u32 {
     };
     if matches!(
         op,
+        VecAluOp::PackSS | VecAluOp::PackSU | VecAluOp::PackUU
+    ) {
+        assert_ne!(lane, 8, "nothing packs a byte lane into something narrower");
+    }
+    if matches!(op, VecAluOp::MergeLow | VecAluOp::MergeHigh) {
+        assert_ne!(lane, 64, "nothing widens a doubleword lane");
+    }
+    if matches!(
+        op,
         VecAluOp::AvgRoundS
             | VecAluOp::AvgRoundU
             | VecAluOp::SAddSat
@@ -184,6 +193,15 @@ fn vx_xo(op: VecAluOp, ty: Type) -> u32 {
         VecAluOp::UAddSat => [512, 576, 640, 0],
         VecAluOp::SSubSat => [1792, 1856, 1920, 0],
         VecAluOp::USubSat => [1536, 1600, 1664, 0],
+        // Merges take the source lane width; there is no doubleword
+        // form because nothing widens a doubleword lane.
+        VecAluOp::MergeLow => [268, 332, 396, 0],
+        VecAluOp::MergeHigh => [12, 76, 140, 0],
+        // Packs are indexed by the *source* width, so the byte slot is
+        // unused: nothing packs bytes into a narrower lane.
+        VecAluOp::PackSS => [0, 398, 462, 1486],
+        VecAluOp::PackSU => [0, 270, 334, 1358],
+        VecAluOp::PackUU => [0, 142, 206, 1230],
         VecAluOp::And | VecAluOp::Or | VecAluOp::Xor | VecAluOp::Nor => {
             unreachable!("{op:?} is emitted as a VSX logical, not a VX form")
         }
@@ -1734,6 +1752,20 @@ impl MachInstEmit for Inst {
                         32 => 1923,
                         64 => 1987,
                         _ => unreachable!("vector lane width {ty}"),
+                    },
+                    // Selected by the source lane width; there is no
+                    // doubleword source, nothing widens to 128 bits.
+                    VecUnaryOp::WidenSLow => match ty.lane_bits() {
+                        8 => 654,   // vupklsb
+                        16 => 718,  // vupklsh
+                        32 => 1742, // vupklsw
+                        _ => unreachable!("widen source lane width {ty}"),
+                    },
+                    VecUnaryOp::WidenSHigh => match ty.lane_bits() {
+                        8 => 526,   // vupkhsb
+                        16 => 590,  // vupkhsh
+                        32 => 1614, // vupkhsw
+                        _ => unreachable!("widen source lane width {ty}"),
                     },
                 };
                 sink.put4(enc_vx(

@@ -395,6 +395,18 @@ mod tests {
         assert_eq!(enc_xx2(34, 35, 171), 0xF040_1AAF); // xvrspic
         assert_eq!(enc_xx2(34, 35, 233), 0xF040_1BA7); // xvrdpip
         assert_eq!(enc_xx2(34, 35, 235), 0xF040_1BAF); // xvrdpic
+        assert_eq!(enc_vx(2, 0, 3, 526), 0x1040_1A0E); // vupkhsb
+        assert_eq!(enc_vx(2, 0, 3, 654), 0x1040_1A8E); // vupklsb
+        assert_eq!(enc_vx(2, 0, 3, 1614), 0x1040_1E4E); // vupkhsw
+        assert_eq!(enc_vx(2, 0, 3, 1742), 0x1040_1ECE); // vupklsw
+        assert_eq!(enc_vx(2, 3, 4, 12), 0x1043_200C); // vmrghb
+        assert_eq!(enc_vx(2, 3, 4, 268), 0x1043_210C); // vmrglb
+        assert_eq!(enc_vx(2, 3, 4, 396), 0x1043_218C); // vmrglw
+        assert_eq!(enc_vx(2, 3, 4, 398), 0x1043_218E); // vpkshss
+        assert_eq!(enc_vx(2, 3, 4, 270), 0x1043_210E); // vpkshus
+        assert_eq!(enc_vx(2, 3, 4, 142), 0x1043_208E); // vpkuhus
+        assert_eq!(enc_vx(2, 3, 4, 1486), 0x1043_25CE); // vpksdss
+        assert_eq!(enc_vx(2, 3, 4, 1230), 0x1043_24CE); // vpkudus
         // Shift-by-immediate forms, all verified against llvm-mc.
         assert_eq!(enc_md(4, 3, 7, 56, 1), 0x7883_3E24); // sldi r3, r4, 7
         assert_eq!(enc_md(4, 3, 57, 7, 0), 0x7883_C9C2); // srdi r3, r4, 7

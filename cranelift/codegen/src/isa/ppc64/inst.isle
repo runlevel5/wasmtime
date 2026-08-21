@@ -172,12 +172,27 @@
     (UAddSat)
     (SSubSat)
     (USubSat)
+    ;; Interleave with a zero vector, which is how unsigned widening is
+    ;; done: the ISA has signed unpack instructions but no unsigned
+    ;; ones. `MergeLow` takes the *register's* low-order half, which
+    ;; under this backend's little-endian lane order is CLIF's low
+    ;; lanes -- see the note on the widening rules.
+    (MergeLow)
+    (MergeHigh)
+    ;; Saturating pack, selected by the *source* lane width: signed to
+    ;; signed, signed to unsigned, unsigned to unsigned.
+    (PackSS)
+    (PackSU)
+    (PackUU)
 ))
 
 ;; Single-operand lane operations in VX form (RA field zero).
 (type VecUnaryOp
   (enum
     (Popcnt)
+    ;; Sign-extending unpack, selected by the *source* lane width.
+    (WidenSLow)
+    (WidenSHigh)
 ))
 
 ;; Floating-point lane arithmetic; the lane type selects between the
@@ -1125,6 +1140,11 @@
 ;; Split a 128-bit constant for materialization through the GPRs.
 (decl pure vec_lanes_under_64 (Type) bool)
 (extern constructor vec_lanes_under_64 vec_lanes_under_64)
+
+;; Narrowing needs a source wider than a byte; there is nothing to
+;; pack bytes into.
+(decl pure vec_lanes_over_8 (Type) bool)
+(extern constructor vec_lanes_over_8 vec_lanes_over_8)
 
 (decl pure vconst_lo64 (u128) u64)
 (extern constructor vconst_lo64 vconst_lo64)

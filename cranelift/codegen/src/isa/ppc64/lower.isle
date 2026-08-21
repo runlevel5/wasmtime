@@ -1728,3 +1728,51 @@
   (output_reg (vec_round (FpuRoundMode.Trunc) (put_in_reg x) ty)))
 (rule 2 (lower (nearest (ty_vec128 ty) x))
   (output_reg (vec_round (FpuRoundMode.Nearest) (put_in_reg x) ty)))
+
+;;;; Vector widening and narrowing ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; The instruction names invert against CLIF's here, and it is worth
+;; being explicit about why. PPC numbers vector elements big-endian, so
+;; its "high" elements are the register's most-significant bytes --
+;; which under this backend's little-endian lane order are CLIF's *high*
+;; lanes. Working it through for bytes, where LE lane i is BE element
+;; 15-i: `vupkhsb` reads BE elements 0-7, i.e. LE lanes 8-15, so it
+;; implements `swiden_high`; `vupklsb` reads BE elements 8-15, i.e. LE
+;; lanes 0-7, so it implements `swiden_low`. Every rule below is
+;; selected by the *source* lane width.
+
+(rule (lower (swiden_low _ x @ (value_type (ty_vec128 in_ty))))
+  (if-let true (vec_lanes_under_64 in_ty))
+  (output_reg (vec_unary (VecUnaryOp.WidenSLow) (put_in_reg x) in_ty)))
+
+(rule (lower (swiden_high _ x @ (value_type (ty_vec128 in_ty))))
+  (if-let true (vec_lanes_under_64 in_ty))
+  (output_reg (vec_unary (VecUnaryOp.WidenSHigh) (put_in_reg x) in_ty)))
+
+;; There are no unsigned unpack instructions, so interleave with zero:
+;; each source lane is paired with a zero lane of the same width, which
+;; is a zero-extension to double width. The zero vector supplies the
+;; more-significant half of each pair, so it is the first operand.
+(rule (lower (uwiden_low _ x @ (value_type (ty_vec128 in_ty))))
+  (if-let true (vec_lanes_under_64 in_ty))
+  (output_reg (vec_alu_rrr (VecAluOp.MergeLow) (vec_zero) (put_in_reg x) in_ty)))
+
+(rule (lower (uwiden_high _ x @ (value_type (ty_vec128 in_ty))))
+  (if-let true (vec_lanes_under_64 in_ty))
+  (output_reg (vec_alu_rrr (VecAluOp.MergeHigh) (vec_zero) (put_in_reg x) in_ty)))
+
+;; The pack instructions put their first operand in the result's
+;; big-endian-low elements, which are the little-endian *high* lanes.
+;; CLIF's `snarrow(x, y)` wants x in the low lanes, so the operands are
+;; swapped.
+(rule (lower (snarrow _ x @ (value_type (ty_vec128 in_ty)) y))
+  (if-let true (vec_lanes_over_8 in_ty))
+  (output_reg (vec_alu_rrr (VecAluOp.PackSS) (put_in_reg y) (put_in_reg x) in_ty)))
+
+(rule (lower (unarrow _ x @ (value_type (ty_vec128 in_ty)) y))
+  (if-let true (vec_lanes_over_8 in_ty))
+  (output_reg (vec_alu_rrr (VecAluOp.PackSU) (put_in_reg y) (put_in_reg x) in_ty)))
+
+(rule (lower (uunarrow _ x @ (value_type (ty_vec128 in_ty)) y))
+  (if-let true (vec_lanes_over_8 in_ty))
+  (output_reg (vec_alu_rrr (VecAluOp.PackUU) (put_in_reg y) (put_in_reg x) in_ty)))

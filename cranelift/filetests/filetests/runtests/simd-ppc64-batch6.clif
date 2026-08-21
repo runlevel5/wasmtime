@@ -1,0 +1,148 @@
+test interpret
+test run
+target powerpc64le
+target powerpc64le has_isa_3_0
+
+;; Widening and narrowing are where PPC's big-endian element numbering
+;; inverts against CLIF's low/high, so every input below is asymmetric:
+;; if a rule picked the mirrored half, the result differs visibly.
+
+function %swiden_low_i8(i8x16) -> i16x8 {
+block0(v0: i8x16):
+    v1 = swiden_low v0
+    return v1
+}
+; run: %swiden_low_i8([1 2 3 4 5 6 7 8 101 102 103 104 105 106 107 108]) == [1 2 3 4 5 6 7 8]
+; run: %swiden_low_i8([-1 -2 0 0 0 0 0 0 9 9 9 9 9 9 9 9]) == [-1 -2 0 0 0 0 0 0]
+
+function %swiden_high_i8(i8x16) -> i16x8 {
+block0(v0: i8x16):
+    v1 = swiden_high v0
+    return v1
+}
+; run: %swiden_high_i8([1 2 3 4 5 6 7 8 101 102 103 104 105 106 107 108]) == [101 102 103 104 105 106 107 108]
+; run: %swiden_high_i8([9 9 9 9 9 9 9 9 -1 -2 0 0 0 0 0 0]) == [-1 -2 0 0 0 0 0 0]
+
+function %swiden_low_i16(i16x8) -> i32x4 {
+block0(v0: i16x8):
+    v1 = swiden_low v0
+    return v1
+}
+; run: %swiden_low_i16([10 20 30 40 1000 2000 3000 4000]) == [10 20 30 40]
+; run: %swiden_low_i16([-32768 -1 0 1 0 0 0 0]) == [-32768 -1 0 1]
+
+function %swiden_high_i16(i16x8) -> i32x4 {
+block0(v0: i16x8):
+    v1 = swiden_high v0
+    return v1
+}
+; run: %swiden_high_i16([10 20 30 40 1000 2000 3000 4000]) == [1000 2000 3000 4000]
+
+function %swiden_low_i32(i32x4) -> i64x2 {
+block0(v0: i32x4):
+    v1 = swiden_low v0
+    return v1
+}
+; run: %swiden_low_i32([7 8 900 1000]) == [7 8]
+; run: %swiden_low_i32([-1 -2147483648 0 0]) == [-1 -2147483648]
+
+function %swiden_high_i32(i32x4) -> i64x2 {
+block0(v0: i32x4):
+    v1 = swiden_high v0
+    return v1
+}
+; run: %swiden_high_i32([7 8 900 1000]) == [900 1000]
+
+function %uwiden_low_i8(i8x16) -> i16x8 {
+block0(v0: i8x16):
+    v1 = uwiden_low v0
+    return v1
+}
+; run: %uwiden_low_i8([1 2 3 4 5 6 7 8 101 102 103 104 105 106 107 108]) == [1 2 3 4 5 6 7 8]
+; run: %uwiden_low_i8([255 254 0 0 0 0 0 0 9 9 9 9 9 9 9 9]) == [255 254 0 0 0 0 0 0]
+
+function %uwiden_high_i8(i8x16) -> i16x8 {
+block0(v0: i8x16):
+    v1 = uwiden_high v0
+    return v1
+}
+; run: %uwiden_high_i8([1 2 3 4 5 6 7 8 101 102 103 104 105 106 107 108]) == [101 102 103 104 105 106 107 108]
+; run: %uwiden_high_i8([9 9 9 9 9 9 9 9 255 254 0 0 0 0 0 0]) == [255 254 0 0 0 0 0 0]
+
+function %uwiden_low_i16(i16x8) -> i32x4 {
+block0(v0: i16x8):
+    v1 = uwiden_low v0
+    return v1
+}
+; run: %uwiden_low_i16([0xffff 1 2 3 100 200 300 400]) == [0xffff 1 2 3]
+
+function %uwiden_high_i16(i16x8) -> i32x4 {
+block0(v0: i16x8):
+    v1 = uwiden_high v0
+    return v1
+}
+; run: %uwiden_high_i16([0 1 2 3 0xffff 200 300 400]) == [0xffff 200 300 400]
+
+function %uwiden_low_i32(i32x4) -> i64x2 {
+block0(v0: i32x4):
+    v1 = uwiden_low v0
+    return v1
+}
+; run: %uwiden_low_i32([0xffffffff 1 2 3]) == [0xffffffff 1]
+
+function %uwiden_high_i32(i32x4) -> i64x2 {
+block0(v0: i32x4):
+    v1 = uwiden_high v0
+    return v1
+}
+; run: %uwiden_high_i32([1 2 0xffffffff 3]) == [0xffffffff 3]
+
+;; Narrowing: x supplies the low result lanes, y the high ones.
+function %snarrow_i16(i16x8, i16x8) -> i8x16 {
+block0(v0: i16x8, v1: i16x8):
+    v2 = snarrow v0, v1
+    return v2
+}
+; run: %snarrow_i16([1 2 3 4 5 6 7 8], [11 12 13 14 15 16 17 18]) == [1 2 3 4 5 6 7 8 11 12 13 14 15 16 17 18]
+; run: %snarrow_i16([200 -200 0 0 0 0 0 0], [0 0 0 0 0 0 0 0]) == [127 -128 0 0 0 0 0 0 0 0 0 0 0 0 0 0]
+
+function %snarrow_i32(i32x4, i32x4) -> i16x8 {
+block0(v0: i32x4, v1: i32x4):
+    v2 = snarrow v0, v1
+    return v2
+}
+; run: %snarrow_i32([1 2 3 4], [11 12 13 14]) == [1 2 3 4 11 12 13 14]
+; run: %snarrow_i32([40000 -40000 0 0], [0 0 0 0]) == [32767 -32768 0 0 0 0 0 0]
+
+function %snarrow_i64(i64x2, i64x2) -> i32x4 {
+block0(v0: i64x2, v1: i64x2):
+    v2 = snarrow v0, v1
+    return v2
+}
+; run: %snarrow_i64([1 2], [11 12]) == [1 2 11 12]
+
+function %unarrow_i16(i16x8, i16x8) -> i8x16 {
+block0(v0: i16x8, v1: i16x8):
+    v2 = unarrow v0, v1
+    return v2
+}
+; run: %unarrow_i16([1 2 3 4 5 6 7 8], [11 12 13 14 15 16 17 18]) == [1 2 3 4 5 6 7 8 11 12 13 14 15 16 17 18]
+; run: %unarrow_i16([300 -5 0 0 0 0 0 0], [0 0 0 0 0 0 0 0]) == [255 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0]
+
+function %uunarrow_i16(i16x8, i16x8) -> i8x16 {
+block0(v0: i16x8, v1: i16x8):
+    v2 = uunarrow v0, v1
+    return v2
+}
+; run: %uunarrow_i16([1 2 3 4 5 6 7 8], [11 12 13 14 15 16 17 18]) == [1 2 3 4 5 6 7 8 11 12 13 14 15 16 17 18]
+; run: %uunarrow_i16([300 0xffff 0 0 0 0 0 0], [0 0 0 0 0 0 0 0]) == [255 255 0 0 0 0 0 0 0 0 0 0 0 0 0 0]
+
+;; Widen then narrow must round-trip the half it selected.
+function %widen_narrow_roundtrip(i8x16) -> i8x16 {
+block0(v0: i8x16):
+    v1 = swiden_low v0
+    v2 = swiden_high v0
+    v3 = snarrow v1, v2
+    return v3
+}
+; run: %widen_narrow_roundtrip([1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16]) == [1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16]

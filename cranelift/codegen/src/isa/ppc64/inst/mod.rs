@@ -1003,6 +1003,11 @@ impl Inst {
                     VecAluOp::UAddSat => "vaddsat_u",
                     VecAluOp::SSubSat => "vsubsat_s",
                     VecAluOp::USubSat => "vsubsat_u",
+                    VecAluOp::MergeLow => "vmrgl",
+                    VecAluOp::MergeHigh => "vmrgh",
+                    VecAluOp::PackSS => "vpk_ss",
+                    VecAluOp::PackSU => "vpk_su",
+                    VecAluOp::PackUU => "vpk_uu",
                     VecAluOp::And => "xxland",
                     VecAluOp::Or => "xxlor",
                     VecAluOp::Xor => "xxlxor",
@@ -1048,6 +1053,8 @@ impl Inst {
             Inst::VecUnary { op, rd, rn, ty } => {
                 let mnemonic = match op {
                     VecUnaryOp::Popcnt => "vpopcnt",
+                    VecUnaryOp::WidenSLow => "vupkl_s",
+                    VecUnaryOp::WidenSHigh => "vupkh_s",
                 };
                 format!("{mnemonic}{} {}, {}", ty.lane_bits(), wreg(*rd), reg(*rn))
             }

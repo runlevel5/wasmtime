@@ -7,6 +7,7 @@ target s390x
 set enable_multi_ret_implicit_sret
 target riscv64 has_v
 target riscv64 has_v has_c has_zcb
+target powerpc64le
 
 function %uunarrow_i16x8(i16x8, i16x8) -> i8x16 {
 block0(v0: i16x8, v1: i16x8):

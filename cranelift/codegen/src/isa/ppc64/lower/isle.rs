@@ -232,6 +232,10 @@ impl generated_code::Context for Ppc64IsleContext<'_, '_, MInst, Ppc64Backend> {
         ty.lane_bits() < 64
     }
 
+    fn vec_lanes_over_8(&mut self, ty: Type) -> bool {
+        ty.lane_bits() > 8
+    }
+
     fn vconst_lo64(&mut self, n: u128) -> u64 {
         n as u64
     }
