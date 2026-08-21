@@ -956,6 +956,37 @@ what the type parameter *means*, an invariant nothing in the type
 system encoded. Caught by running the **full** suite, not batch 9's own
 tests, which passed while breaking batch 8.
 
+#### Batch 10 (2026-08-21): pairwise addition
+
+No horizontal-add instruction exists and none is needed: **a pair of
+adjacent lanes is one lane of the next width up** (even element in the
+low half, odd in the high). Shift the double-width lane down by one
+element width, add at double width, and the pack discards the high half
+where the carry went. Six instructions.
+
+Semantics checked against the docs *and* the upstream test, not
+assumed: the result **concatenates** (operand 1's sums = low lanes),
+so it is the pack's second argument. Had it interleaved,
+`vmrgew`/`vmrgow` would have looked like the obvious tools and given a
+subtly wrong order.
+
+**Limit of the splat-immediate shift trick** found here: the word-pair
+case needs a doubleword shift of 32, and no 5-bit immediate is
+congruent to 32 mod 64, so that one needs the GPR path.
+
+Unlocked 4 upstream tests, 3 of which only became reachable because
+earlier batches *compose*: `simd-sdot` and
+`simd-wideningpairwisedotproducts` need widening (b6) + multiply (b7-8)
++ pairwise add; `simd-addv-reduce` also needs lane extract (b4).
+
+**`vmsumshm` fusion now actionable but deliberately not done**: it
+collapses the widen/multiply/pairwise-add tree to one instruction (the
+`sdot` fusion aarch64 does). Phase 6 measured off-critical-path
+instruction removal as worth nothing in wall-clock here, and 4-into-1
+is exactly the change that looks obviously good and may measure as
+nothing. Benchmark either side before committing to it; the Phase 6
+harness is still on the POWER9.
+
 Still unimplemented, blocking further upstream tests: 64-bit vector
 types (`i8x8`, `i32x2`, `f32x2`), `bitcast` to `i128`, widening and
 narrowing, `shuffle`/`swizzle`, saturating arithmetic, `fmin`/`fmax`
