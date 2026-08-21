@@ -926,6 +926,36 @@ from the proposal, so this is CLIF completeness with no wasm traffic)
 and the `umulhi`/`smulhi` family, which reuses the same even/odd
 derivation.
 
+#### Batch 9 (2026-08-21): high-half multiply, and the safety net firing
+
+`smulhi`/`umulhi` at byte, halfword and word widths. Two findings:
+
+- **i32x4 mulhi is three instructions**, not the seven budgeted. A
+  doubleword's high word is its *odd* LE word lane, and `vmrgew`
+  ("merge **even** word") interleaves exactly the odd LE word lanes --
+  so the two even/odd products feed one merge with no shift or mask.
+  Fourth family where the inversion, once derived, *helps*.
+- **Shift-amount trick**: `vspltisw`'s immediate stops at 15, but the
+  vector shifts read only log2(lane width) bits per element, so
+  `vspltisw -16` splatted to words yields a shift of 16 in one
+  instruction (vs three for the GPR round-trip). Documented on
+  `VecSpltImm`; reusable for other awkward amounts.
+- i64x2 mulhi is **absent, not deferred** — needs 64x64->128, which
+  does not exist pre-POWER10. Distinct category from things skipped by
+  choice.
+
+**The emit assertion caught a regression I introduced.** Unifying batch
+8's private `MulOddWordU` into the general `MulOddU` moved the table
+index from *result* width to *source* width; batch 8's three call sites
+still passed `$I64X2`. Index 3 is a poisoned zero and extended opcode 0
+is `vaddubm`, so i64x2 multiply would have silently *added*. Two
+lessons: (1) the batch-5 layering (rule guard primary, emit assertion
+as defence-in-depth) paid off exactly as intended, three batches later;
+(2) unifying op variants is riskier than it looks — the merge changed
+what the type parameter *means*, an invariant nothing in the type
+system encoded. Caught by running the **full** suite, not batch 9's own
+tests, which passed while breaking batch 8.
+
 Still unimplemented, blocking further upstream tests: 64-bit vector
 types (`i8x8`, `i32x2`, `f32x2`), `bitcast` to `i128`, widening and
 narrowing, `shuffle`/`swizzle`, saturating arithmetic, `fmin`/`fmax`
