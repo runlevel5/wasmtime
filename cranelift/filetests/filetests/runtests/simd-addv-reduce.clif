@@ -3,6 +3,7 @@ test run
 target aarch64
 target x86_64 has_sse3 has_ssse3 has_sse41
 target s390x
+target powerpc64le
 
 ;; A complete `i32x4` horizontal-add reduction, expressed as two pairwise adds
 ;; plus a lane-0 extract. On aarch64 this lowers to a single `addv`.

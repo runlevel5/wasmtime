@@ -1892,3 +1892,42 @@
                 (vec_alu_rrr (VecAluOp.MulOddU) (put_in_reg x) (put_in_reg y) $I8X16)
                 (vec_alu_rrr (VecAluOp.MulEvenU) (put_in_reg x) (put_in_reg y) $I8X16)
                 $I16X8 $I8X16 8)))
+
+;;;; Pairwise addition ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; There is no horizontal-add instruction, but a pair of adjacent lanes
+;; is exactly one lane of the next width up, holding the even element in
+;; its low half and the odd element in its high half. So shifting a
+;; double-width lane down by one element width brings the odd element
+;; alongside the even one, and a double-width add leaves their sum in the
+;; low half -- the carry out of it corrupts only the high half, which the
+;; pack then discards. The first operand supplies the result's low lanes,
+;; which is the second argument to the pack.
+(decl iadd_pairwise_via (Reg Reg Reg Type) Reg)
+(rule (iadd_pairwise_via xr yr amt wide_ty)
+  (let ((xs Reg (vec_alu_rrr (VecAluOp.Add) xr
+                             (vec_alu_rrr (VecAluOp.ShrU) xr amt wide_ty)
+                             wide_ty))
+        (ys Reg (vec_alu_rrr (VecAluOp.Add) yr
+                             (vec_alu_rrr (VecAluOp.ShrU) yr amt wide_ty)
+                             wide_ty)))
+    (vec_alu_rrr (VecAluOp.PackMod) ys xs wide_ty)))
+
+;; The shift amounts ride in the low bits of a splat immediate where
+;; they fit: the shifts read only log2(lane width) bits per element, so
+;; -16 splatted to words means sixteen. A doubleword shift of
+;; thirty-two has no such encoding -- no five-bit immediate is
+;; congruent to it modulo sixty-four -- so that one comes through a
+;; general register.
+(rule (lower (iadd_pairwise $I8X16 x y))
+  (output_reg (iadd_pairwise_via (put_in_reg x) (put_in_reg y)
+                                 (vec_splt_imm 8 $I16X8) $I16X8)))
+
+(rule (lower (iadd_pairwise $I16X8 x y))
+  (output_reg (iadd_pairwise_via (put_in_reg x) (put_in_reg y)
+                                 (vec_splt_imm -16 $I32X4) $I32X4)))
+
+(rule (lower (iadd_pairwise $I32X4 x y))
+  (output_reg (iadd_pairwise_via (put_in_reg x) (put_in_reg y)
+                                 (vec_splat_lane (mov_to_vec (imm $I64 32)) $I64X2)
+                                 $I64X2)))
