@@ -135,6 +135,12 @@ pub(crate) fn enc_vx(vt: u32, va: u32, vb: u32, xo: u32) -> u32 {
     (4 << 26) | (vt << 21) | (va << 16) | (vb << 11) | xo
 }
 
+/// VA-form (four-operand VMX): `4 | VT | VA | VB | VC | XO6`.
+pub(crate) fn enc_va(vt: u32, va: u32, vb: u32, vc: u32, xo: u32) -> u32 {
+    debug_assert!(vt < 32 && va < 32 && vb < 32 && vc < 32 && xo < 64);
+    (4 << 26) | (vt << 21) | (va << 16) | (vb << 11) | (vc << 6) | xo
+}
+
 /// VSX X-form load/store: `31 | T5 | RA | RB | XO10 | TX`. The 6-bit
 /// VSR number is split into a 5-bit field and the TX/SX low bit.
 pub(crate) fn enc_vsx_x(t6: u32, ra: u32, rb: u32, xo: u32) -> u32 {
@@ -407,6 +413,10 @@ mod tests {
         assert_eq!(enc_vx(2, 3, 4, 142), 0x1043_208E); // vpkuhus
         assert_eq!(enc_vx(2, 3, 4, 1486), 0x1043_25CE); // vpksdss
         assert_eq!(enc_vx(2, 3, 4, 1230), 0x1043_24CE); // vpkudus
+        assert_eq!(enc_vx(2, 3, 4, 137), 0x1043_2089); // vmuluwm
+        assert_eq!(enc_va(2, 3, 4, 5, 34), 0x1043_2162); // vmladduhm
+        assert_eq!(enc_va(2, 3, 4, 5, 40), 0x1043_2168); // vmsumshm
+        assert_eq!(enc_va(2, 3, 4, 5, 33), 0x1043_2161); // vmhraddshs
         // Shift-by-immediate forms, all verified against llvm-mc.
         assert_eq!(enc_md(4, 3, 7, 56, 1), 0x7883_3E24); // sldi r3, r4, 7
         assert_eq!(enc_md(4, 3, 57, 7, 0), 0x7883_C9C2); // srdi r3, r4, 7

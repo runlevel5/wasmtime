@@ -30,7 +30,7 @@ use crate::isa::ppc64::abi::Ppc64MachineDeps;
 
 pub use crate::isa::ppc64::lower::isle::generated_code::{
     AluImmOp, AluOp, BitOp, DivOp, FpuOp1, FpuOp2, FpuRoundMode, LoadOP, MInst as Inst, ShiftOp,
-    StoreOP, VecAluOp, VecFpuOp1, VecFpuOp2, VecUnaryOp,
+    StoreOP, VecAluOp, VecAluOp4, VecFpuOp1, VecFpuOp2, VecUnaryOp,
     UnaryOp,
 };
 
@@ -207,6 +207,12 @@ fn ppc64_get_operands(inst: &mut Inst, collector: &mut impl OperandVisitor) {
         Inst::VecInsertLane { rd, rv, rs, .. } => {
             collector.reg_use(rv);
             collector.reg_use(rs);
+            collector.reg_def(rd);
+        }
+        Inst::VecAluRRRR { rd, ra, rb, rc, .. } => {
+            collector.reg_use(ra);
+            collector.reg_use(rb);
+            collector.reg_use(rc);
             collector.reg_def(rd);
         }
         Inst::VecUnary { rd, rn, .. } | Inst::VecRound { rd, rn, .. } => {
@@ -1008,6 +1014,7 @@ impl Inst {
                     VecAluOp::PackSS => "vpk_ss",
                     VecAluOp::PackSU => "vpk_su",
                     VecAluOp::PackUU => "vpk_uu",
+                    VecAluOp::MulWord => "vmuluwm",
                     VecAluOp::And => "xxland",
                     VecAluOp::Or => "xxlor",
                     VecAluOp::Xor => "xxlxor",
@@ -1048,6 +1055,25 @@ impl Inst {
                     wreg(*rd),
                     reg(*rv),
                     reg(*rs)
+                )
+            }
+            Inst::VecAluRRRR {
+                op,
+                rd,
+                ra,
+                rb,
+                rc,
+            } => {
+                let mnemonic = match op {
+                    VecAluOp4::MulAddUH => "vmladduhm",
+                    VecAluOp4::MulHiRoundAddSHS => "vmhraddshs",
+                };
+                format!(
+                    "{mnemonic} {}, {}, {}, {}",
+                    wreg(*rd),
+                    reg(*ra),
+                    reg(*rb),
+                    reg(*rc)
                 )
             }
             Inst::VecUnary { op, rd, rn, ty } => {

@@ -184,6 +184,25 @@
     (PackSS)
     (PackSU)
     (PackUU)
+    ;; Word-lane multiply, low half (`vmuluwm`). Word only.
+    (MulWord)
+))
+
+;; Four-operand VMX multiply forms. Each is per-lane, so unlike the
+;; even/odd multiplies they need no big-endian element reasoning.
+(type VecAluOp4
+  (enum
+    ;; (a * b + c) mod 2^16, per halfword: vector `imul` with c = 0.
+    (MulAddUH)
+    ;; NOTE: `vmsumshm` (per word, the sum of that word's two halfword
+    ;; products, plus c) computes exactly the tree that CLIF spells as
+    ;; swiden + imul + iadd_pairwise -- the same fusion aarch64 does to
+    ;; reach `sdot`. Worth folding once `iadd_pairwise` exists, and
+    ;; worth measuring first: Phase 6 found instruction-count wins do
+    ;; not necessarily show up in wall-clock on this core.
+    ;; sat((a * b + 0x4000) >> 15) + c per halfword, which is exactly
+    ;; CLIF's Q15 saturating rounding multiply when c = 0.
+    (MulHiRoundAddSHS)
 ))
 
 ;; Single-operand lane operations in VX form (RA field zero).
@@ -427,6 +446,14 @@
       (rs Reg)
       (ty Type)
       (lane u8))
+
+    ;; Four-operand lane multiply.
+    (VecAluRRRR
+      (op VecAluOp4)
+      (rd WritableReg)
+      (ra Reg)
+      (rb Reg)
+      (rc Reg))
 
     ;; Single-operand lane operation.
     (VecUnary
@@ -1047,6 +1074,12 @@
 (rule (vec_insert_lane rv rs ty lane)
   (let ((dst WritableReg (temp_writable_reg $I8X16))
         (_ Unit (emit (MInst.VecInsertLane dst rv rs ty lane))))
+    dst))
+
+(decl vec_alu_rrrr (VecAluOp4 Reg Reg Reg) Reg)
+(rule (vec_alu_rrrr op a b c)
+  (let ((dst WritableReg (temp_writable_reg $I8X16))
+        (_ Unit (emit (MInst.VecAluRRRR op dst a b c))))
     dst))
 
 (decl vec_unary (VecUnaryOp Reg Type) Reg)

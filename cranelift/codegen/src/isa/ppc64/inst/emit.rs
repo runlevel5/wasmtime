@@ -149,6 +149,9 @@ fn vx_xo(op: VecAluOp, ty: Type) -> u32 {
         64 => 3,
         _ => unreachable!("vector lane width {ty}"),
     };
+    if matches!(op, VecAluOp::MulWord) {
+        assert_eq!(lane, 32, "vmuluwm is a word-lane multiply");
+    }
     if matches!(
         op,
         VecAluOp::PackSS | VecAluOp::PackSU | VecAluOp::PackUU
@@ -202,6 +205,8 @@ fn vx_xo(op: VecAluOp, ty: Type) -> u32 {
         VecAluOp::PackSS => [0, 398, 462, 1486],
         VecAluOp::PackSU => [0, 270, 334, 1358],
         VecAluOp::PackUU => [0, 142, 206, 1230],
+        // `vmuluwm` is word-only.
+        VecAluOp::MulWord => [0, 0, 137, 0],
         VecAluOp::And | VecAluOp::Or | VecAluOp::Xor | VecAluOp::Nor => {
             unreachable!("{op:?} is emitted as a VSX logical, not a VX form")
         }
@@ -1742,6 +1747,26 @@ impl MachInstEmit for Inst {
                     sink.put4(enc_vsx_x(dst, 0, 0, 844)); // lxvd2x
                     sink.put4(enc_xxpermdi(dst, dst, dst, 2)); // xxswapd
                 }
+            }
+
+            &Inst::VecAluRRRR {
+                op,
+                rd,
+                ra,
+                rb,
+                rc,
+            } => {
+                let xo = match op {
+                    VecAluOp4::MulAddUH => 34,
+                    VecAluOp4::MulHiRoundAddSHS => 33,
+                };
+                sink.put4(enc_va(
+                    vsr_num(rd.to_reg()) - 32,
+                    vsr_num(ra) - 32,
+                    vsr_num(rb) - 32,
+                    vsr_num(rc) - 32,
+                    xo,
+                ));
             }
 
             &Inst::VecUnary { op, rd, rn, ty } => {
