@@ -1,0 +1,54 @@
+test interpret
+test run
+target powerpc64le
+target powerpc64le has_isa_3_0
+
+;; High-half multiply. Every lane carries a different value so a wrong
+;; gather -- picking the low half, or the mirrored lane -- shows up.
+
+function %umulhi_i32x4(i32x4, i32x4) -> i32x4 {
+block0(v0: i32x4, v1: i32x4):
+    v2 = umulhi v0, v1
+    return v2
+}
+; run: %umulhi_i32x4([0x10000 0x20000 0x30000 0x40000], [0x10000 0x10000 0x10000 0x10000]) == [1 2 3 4]
+; run: %umulhi_i32x4([0xffffffff 0xffffffff 1 0], [0xffffffff 2 1 0xffffffff]) == [0xfffffffe 1 0 0]
+
+function %smulhi_i32x4(i32x4, i32x4) -> i32x4 {
+block0(v0: i32x4, v1: i32x4):
+    v2 = smulhi v0, v1
+    return v2
+}
+; run: %smulhi_i32x4([0x10000 -0x20000 0x30000 -1], [0x10000 0x10000 0x10000 0x10000]) == [1 -2 3 -1]
+; run: %smulhi_i32x4([-1 -1 0x7fffffff 0x80000000], [-1 1 0x7fffffff 0x80000000]) == [0 -1 0x3fffffff 0x40000000]
+
+function %umulhi_i16x8(i16x8, i16x8) -> i16x8 {
+block0(v0: i16x8, v1: i16x8):
+    v2 = umulhi v0, v1
+    return v2
+}
+; run: %umulhi_i16x8([0x100 0x200 0x300 0x400 0x500 0x600 0x700 0x800], [0x100 0x100 0x100 0x100 0x100 0x100 0x100 0x100]) == [1 2 3 4 5 6 7 8]
+; run: %umulhi_i16x8([0xffff 0xffff 1 0 0x8000 0x8000 2 3], [0xffff 2 1 0xffff 0x8000 2 3 0x8000]) == [0xfffe 1 0 0 0x4000 1 0 1]
+
+function %smulhi_i16x8(i16x8, i16x8) -> i16x8 {
+block0(v0: i16x8, v1: i16x8):
+    v2 = smulhi v0, v1
+    return v2
+}
+; run: %smulhi_i16x8([0x100 -0x200 0x300 -0x400 0x500 -0x600 0x700 -0x800], [0x100 0x100 0x100 0x100 0x100 0x100 0x100 0x100]) == [1 -2 3 -4 5 -6 7 -8]
+; run: %smulhi_i16x8([-1 -1 0x7fff -32768 0 1 2 3], [-1 1 0x7fff -32768 5 1 2 3]) == [0 -1 0x3fff 0x4000 0 0 0 0]
+
+function %umulhi_i8x16(i8x16, i8x16) -> i8x16 {
+block0(v0: i8x16, v1: i8x16):
+    v2 = umulhi v0, v1
+    return v2
+}
+; run: %umulhi_i8x16([0x10 0x20 0x30 0x40 0x50 0x60 0x70 0x80 0x90 0xa0 0xb0 0xc0 0xd0 0xe0 0xf0 0xff], [0x10 0x10 0x10 0x10 0x10 0x10 0x10 0x10 0x10 0x10 0x10 0x10 0x10 0x10 0x10 0x10]) == [1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 15]
+; run: %umulhi_i8x16([255 255 1 0 128 128 2 3 4 5 6 7 8 9 10 11], [255 2 1 255 128 2 3 4 5 6 7 8 9 10 11 12]) == [254 1 0 0 64 1 0 0 0 0 0 0 0 0 0 0]
+
+function %smulhi_i8x16(i8x16, i8x16) -> i8x16 {
+block0(v0: i8x16, v1: i8x16):
+    v2 = smulhi v0, v1
+    return v2
+}
+; run: %smulhi_i8x16([-1 -1 127 -128 0 1 2 3 16 -16 32 -32 64 -64 100 -100], [-1 1 127 -128 5 1 2 3 16 16 4 4 2 2 2 2]) == [0 -1 63 64 0 0 0 0 1 -1 0 -1 0 -1 0 -1]

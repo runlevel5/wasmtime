@@ -149,8 +149,20 @@ fn vx_xo(op: VecAluOp, ty: Type) -> u32 {
         64 => 3,
         _ => unreachable!("vector lane width {ty}"),
     };
-    if matches!(op, VecAluOp::MulOddWordU | VecAluOp::RotlDword) {
-        assert_eq!(lane, 64, "{op:?} produces or operates on doubleword lanes");
+    if matches!(op, VecAluOp::RotlDword) {
+        assert_eq!(lane, 64, "vrld operates on doubleword lanes");
+    }
+    if matches!(op, VecAluOp::MergeEvenWord) {
+        assert_eq!(lane, 32, "vmrgew is a word-lane merge");
+    }
+    if matches!(
+        op,
+        VecAluOp::MulEvenS | VecAluOp::MulOddS | VecAluOp::MulEvenU | VecAluOp::MulOddU
+    ) {
+        assert_ne!(lane, 64, "a doubleword even/odd product would not fit");
+    }
+    if matches!(op, VecAluOp::PackMod) {
+        assert_ne!(lane, 8, "nothing packs a byte lane into something narrower");
     }
     if matches!(op, VecAluOp::MulWord) {
         assert_eq!(lane, 32, "vmuluwm is a word-lane multiply");
@@ -210,8 +222,16 @@ fn vx_xo(op: VecAluOp, ty: Type) -> u32 {
         VecAluOp::PackUU => [0, 142, 206, 1230],
         // `vmuluwm` is word-only.
         VecAluOp::MulWord => [0, 0, 137, 0],
-        // Doubleword result, word sources.
-        VecAluOp::MulOddWordU => [0, 0, 0, 136],
+        // Even/odd multiplies, indexed by source lane width; there is
+        // no doubleword source because the result would not fit.
+        VecAluOp::MulEvenS => [776, 840, 904, 0],
+        VecAluOp::MulOddS => [264, 328, 392, 0],
+        VecAluOp::MulEvenU => [520, 584, 648, 0],
+        VecAluOp::MulOddU => [8, 72, 136, 0],
+        // Truncating pack, indexed by source width; nothing packs a
+        // byte lane.
+        VecAluOp::PackMod => [0, 14, 78, 1102],
+        VecAluOp::MergeEvenWord => [0, 0, 1932, 0],
         VecAluOp::RotlDword => [0, 0, 0, 196],
         VecAluOp::And | VecAluOp::Or | VecAluOp::Xor | VecAluOp::Nor => {
             unreachable!("{op:?} is emitted as a VSX logical, not a VX form")
@@ -1771,6 +1791,21 @@ impl MachInstEmit for Inst {
                     vsr_num(ra) - 32,
                     vsr_num(rb) - 32,
                     vsr_num(rc) - 32,
+                    xo,
+                ));
+            }
+
+            &Inst::VecSpltImm { rd, imm, ty } => {
+                let xo = match ty.lane_bits() {
+                    8 => 780,  // vspltisb
+                    16 => 844, // vspltish
+                    32 => 908, // vspltisw
+                    _ => unreachable!("no doubleword splat-immediate exists"),
+                };
+                sink.put4(enc_vx(
+                    vsr_num(rd.to_reg()) - 32,
+                    (imm as u32) & 0x1F,
+                    0,
                     xo,
                 ));
             }

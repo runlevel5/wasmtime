@@ -1814,11 +1814,81 @@
   (let ((xr Reg (put_in_reg x))
         (yr Reg (put_in_reg y))
         (c32 Reg (vec_splat_lane (mov_to_vec (imm $I64 32)) $I64X2))
-        (lo Reg (vec_alu_rrr (VecAluOp.MulOddWordU) xr yr $I64X2))
+        ;; Word sources, doubleword products: the op is selected by the
+        ;; source width, so this is $I32X4 even though the lanes being
+        ;; multiplied are halves of $I64X2 lanes.
+        (lo Reg (vec_alu_rrr (VecAluOp.MulOddU) xr yr $I32X4))
         (y_swapped Reg (vec_alu_rrr (VecAluOp.RotlDword) yr c32 $I64X2))
         (x_swapped Reg (vec_alu_rrr (VecAluOp.RotlDword) xr c32 $I64X2))
-        (cross_a Reg (vec_alu_rrr (VecAluOp.MulOddWordU) xr y_swapped $I64X2))
-        (cross_b Reg (vec_alu_rrr (VecAluOp.MulOddWordU) x_swapped yr $I64X2))
+        (cross_a Reg (vec_alu_rrr (VecAluOp.MulOddU) xr y_swapped $I32X4))
+        (cross_b Reg (vec_alu_rrr (VecAluOp.MulOddU) x_swapped yr $I32X4))
         (cross Reg (vec_alu_rrr (VecAluOp.Add) cross_a cross_b $I64X2))
         (shifted Reg (vec_alu_rrr (VecAluOp.Shl) cross c32 $I64X2)))
     (output_reg (vec_alu_rrr (VecAluOp.Add) lo shifted $I64X2))))
+
+;;;; Vector high-half multiply ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; The even/odd multiplies give full double-width products of alternate
+;; lanes, so the high halves have to be gathered back into one vector.
+;; Naming the intermediates by *lane order* rather than by mnemonic:
+;; `evens` holds the products of the even little-endian lanes (from the
+;; instruction whose mnemonic says "odd") and `odds` the products of the
+;; odd lanes.
+;;
+;; At word width the gather is a single instruction. A doubleword's high
+;; word is its odd little-endian word lane, and `vmrgew` interleaves
+;; exactly the odd little-endian word lanes of its two operands, in the
+;; order (second operand's, first operand's, ...) -- so it collects the
+;; four high words directly.
+(decl mulhi_i32x4 (Reg Reg) Reg)
+(rule (mulhi_i32x4 evens odds)
+  (vec_alu_rrr (VecAluOp.MergeEvenWord) odds evens $I32X4))
+
+(rule 3 (lower (smulhi $I32X4 x y))
+  (output_reg (mulhi_i32x4
+                (vec_alu_rrr (VecAluOp.MulOddS) (put_in_reg x) (put_in_reg y) $I32X4)
+                (vec_alu_rrr (VecAluOp.MulEvenS) (put_in_reg x) (put_in_reg y) $I32X4))))
+
+(rule 3 (lower (umulhi $I32X4 x y))
+  (output_reg (mulhi_i32x4
+                (vec_alu_rrr (VecAluOp.MulOddU) (put_in_reg x) (put_in_reg y) $I32X4)
+                (vec_alu_rrr (VecAluOp.MulEvenU) (put_in_reg x) (put_in_reg y) $I32X4))))
+
+;; At the narrower widths there is no merge for the needed granularity,
+;; so the products are first interleaved back into source order with the
+;; ordinary merges, then each one's high half is moved down and the two
+;; halves packed. The shift amount comes from a splat immediate whose
+;; *low bits* carry it: the vector shifts read only log2(lane width)
+;; bits of each element, so -16 splatted to words shifts by 16.
+(decl mulhi_narrow (Reg Reg Type Type i8) Reg)
+(rule (mulhi_narrow evens odds prod_ty out_ty shift)
+  (let ((lo Reg (vec_alu_rrr (VecAluOp.MergeLow) odds evens prod_ty))
+        (hi Reg (vec_alu_rrr (VecAluOp.MergeHigh) odds evens prod_ty))
+        (amt Reg (vec_splt_imm shift prod_ty))
+        (lo_sh Reg (vec_alu_rrr (VecAluOp.ShrU) lo amt prod_ty))
+        (hi_sh Reg (vec_alu_rrr (VecAluOp.ShrU) hi amt prod_ty)))
+    (vec_alu_rrr (VecAluOp.PackMod) hi_sh lo_sh prod_ty)))
+
+(rule 3 (lower (smulhi $I16X8 x y))
+  (output_reg (mulhi_narrow
+                (vec_alu_rrr (VecAluOp.MulOddS) (put_in_reg x) (put_in_reg y) $I16X8)
+                (vec_alu_rrr (VecAluOp.MulEvenS) (put_in_reg x) (put_in_reg y) $I16X8)
+                $I32X4 $I16X8 -16)))
+
+(rule 3 (lower (umulhi $I16X8 x y))
+  (output_reg (mulhi_narrow
+                (vec_alu_rrr (VecAluOp.MulOddU) (put_in_reg x) (put_in_reg y) $I16X8)
+                (vec_alu_rrr (VecAluOp.MulEvenU) (put_in_reg x) (put_in_reg y) $I16X8)
+                $I32X4 $I16X8 -16)))
+
+(rule 3 (lower (smulhi $I8X16 x y))
+  (output_reg (mulhi_narrow
+                (vec_alu_rrr (VecAluOp.MulOddS) (put_in_reg x) (put_in_reg y) $I8X16)
+                (vec_alu_rrr (VecAluOp.MulEvenS) (put_in_reg x) (put_in_reg y) $I8X16)
+                $I16X8 $I8X16 8)))
+
+(rule 3 (lower (umulhi $I8X16 x y))
+  (output_reg (mulhi_narrow
+                (vec_alu_rrr (VecAluOp.MulOddU) (put_in_reg x) (put_in_reg y) $I8X16)
+                (vec_alu_rrr (VecAluOp.MulEvenU) (put_in_reg x) (put_in_reg y) $I8X16)
+                $I16X8 $I8X16 8)))

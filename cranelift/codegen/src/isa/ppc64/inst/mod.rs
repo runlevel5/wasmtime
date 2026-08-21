@@ -215,6 +215,9 @@ fn ppc64_get_operands(inst: &mut Inst, collector: &mut impl OperandVisitor) {
             collector.reg_use(rc);
             collector.reg_def(rd);
         }
+        Inst::VecSpltImm { rd, .. } => {
+            collector.reg_def(rd);
+        }
         Inst::VecUnary { rd, rn, .. } | Inst::VecRound { rd, rn, .. } => {
             collector.reg_use(rn);
             collector.reg_def(rd);
@@ -1015,7 +1018,12 @@ impl Inst {
                     VecAluOp::PackSU => "vpk_su",
                     VecAluOp::PackUU => "vpk_uu",
                     VecAluOp::MulWord => "vmuluwm",
-                    VecAluOp::MulOddWordU => "vmulouw",
+                    VecAluOp::MulEvenS => "vmules",
+                    VecAluOp::MulOddS => "vmulos",
+                    VecAluOp::MulEvenU => "vmuleu",
+                    VecAluOp::MulOddU => "vmulou",
+                    VecAluOp::PackMod => "vpk_um",
+                    VecAluOp::MergeEvenWord => "vmrgew",
                     VecAluOp::RotlDword => "vrld",
                     VecAluOp::And => "xxland",
                     VecAluOp::Or => "xxlor",
@@ -1077,6 +1085,9 @@ impl Inst {
                     reg(*rb),
                     reg(*rc)
                 )
+            }
+            Inst::VecSpltImm { rd, imm, ty } => {
+                format!("vspltis{} {}, {imm}", ty.lane_bits(), wreg(*rd))
             }
             Inst::VecUnary { op, rd, rn, ty } => {
                 let mnemonic = match op {

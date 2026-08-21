@@ -186,14 +186,26 @@
     (PackUU)
     ;; Word-lane multiply, low half (`vmuluwm`). Word only.
     (MulWord)
-    ;; `vmulouw`: the 32x32->64 product of each doubleword's *low*
-    ;; word. The mnemonic says "odd", meaning odd big-endian word
-    ;; elements, which under this backend's little-endian lane order
-    ;; are the even ones -- and the even little-endian word lane of a
-    ;; doubleword is its low half. Doubleword result only.
-    (MulOddWordU)
+    ;; Even/odd multiplies: the full double-width product of every
+    ;; other source lane, selected by the *source* lane width. The
+    ;; mnemonics' "even" and "odd" refer to big-endian elements, so
+    ;; under this backend's lane order they are inverted: `vmule*`
+    ;; takes the odd little-endian lanes and `vmulo*` the even ones.
+    ;; (Hence `MulOddU` at word width supplying a doubleword's low-half
+    ;; product, which is what the i64x2 multiply needs.)
+    (MulEvenS)
+    (MulOddS)
+    (MulEvenU)
+    (MulOddU)
+    ;; Truncating pack -- the low half of each source lane, no
+    ;; saturation. Indexed by source width.
+    (PackMod)
+    ;; `vmrgew`: interleave the odd little-endian word lanes of the two
+    ;; operands. Word only.
+    (MergeEvenWord)
     ;; Rotate each doubleword left by the per-lane amount (`vrld`).
     (RotlDword)
+
 ))
 
 ;; Four-operand VMX multiply forms. Each is per-lane, so unlike the
@@ -462,6 +474,16 @@
       (ra Reg)
       (rb Reg)
       (rc Reg))
+
+    ;; Splat a 5-bit signed immediate to every lane (`vspltis{b,h,w}`).
+    ;; Useful beyond small constants: the vector shifts read only the
+    ;; low log2(lane width) bits of each element, so a negative
+    ;; immediate can encode a shift amount its range would not
+    ;; otherwise reach -- -16 splatted to words has low five bits 16.
+    (VecSpltImm
+      (rd WritableReg)
+      (imm i8)
+      (ty Type))
 
     ;; Single-operand lane operation.
     (VecUnary
@@ -1082,6 +1104,12 @@
 (rule (vec_insert_lane rv rs ty lane)
   (let ((dst WritableReg (temp_writable_reg $I8X16))
         (_ Unit (emit (MInst.VecInsertLane dst rv rs ty lane))))
+    dst))
+
+(decl vec_splt_imm (i8 Type) Reg)
+(rule (vec_splt_imm imm ty)
+  (let ((dst WritableReg (temp_writable_reg $I8X16))
+        (_ Unit (emit (MInst.VecSpltImm dst imm ty))))
     dst))
 
 (decl vec_alu_rrrr (VecAluOp4 Reg Reg Reg) Reg)
