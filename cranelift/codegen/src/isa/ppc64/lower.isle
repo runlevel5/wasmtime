@@ -1798,3 +1798,27 @@
 (rule (lower (sqmul_round_sat $I16X8 x y))
   (output_reg (vec_alu_rrrr (VecAluOp4.MulHiRoundAddSHS)
                             (put_in_reg x) (put_in_reg y) (vec_zero))))
+
+;; Doubleword multiply has no single instruction before POWER10, so it
+;; is built from the 32-bit halves:
+;;
+;;   a * b  ==  al*bl + (al*bh + ah*bl) * 2^32   (mod 2^64)
+;;
+;; the ah*bh term falling outside 64 bits. `vmulouw` supplies al*bl
+;; directly -- see the note on `MulOddWordU` for why the "odd"
+;; mnemonic denotes the low word here -- and rotating each doubleword
+;; by 32 swaps its halves, so the same instruction applied to a
+;; rotated operand gives a cross product. The shift amount comes from
+;; a general register because `vspltisw`'s immediate only reaches 15.
+(rule 5 (lower (imul $I64X2 x y))
+  (let ((xr Reg (put_in_reg x))
+        (yr Reg (put_in_reg y))
+        (c32 Reg (vec_splat_lane (mov_to_vec (imm $I64 32)) $I64X2))
+        (lo Reg (vec_alu_rrr (VecAluOp.MulOddWordU) xr yr $I64X2))
+        (y_swapped Reg (vec_alu_rrr (VecAluOp.RotlDword) yr c32 $I64X2))
+        (x_swapped Reg (vec_alu_rrr (VecAluOp.RotlDword) xr c32 $I64X2))
+        (cross_a Reg (vec_alu_rrr (VecAluOp.MulOddWordU) xr y_swapped $I64X2))
+        (cross_b Reg (vec_alu_rrr (VecAluOp.MulOddWordU) x_swapped yr $I64X2))
+        (cross Reg (vec_alu_rrr (VecAluOp.Add) cross_a cross_b $I64X2))
+        (shifted Reg (vec_alu_rrr (VecAluOp.Shl) cross c32 $I64X2)))
+    (output_reg (vec_alu_rrr (VecAluOp.Add) lo shifted $I64X2))))

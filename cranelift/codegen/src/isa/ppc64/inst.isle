@@ -186,6 +186,14 @@
     (PackUU)
     ;; Word-lane multiply, low half (`vmuluwm`). Word only.
     (MulWord)
+    ;; `vmulouw`: the 32x32->64 product of each doubleword's *low*
+    ;; word. The mnemonic says "odd", meaning odd big-endian word
+    ;; elements, which under this backend's little-endian lane order
+    ;; are the even ones -- and the even little-endian word lane of a
+    ;; doubleword is its low half. Doubleword result only.
+    (MulOddWordU)
+    ;; Rotate each doubleword left by the per-lane amount (`vrld`).
+    (RotlDword)
 ))
 
 ;; Four-operand VMX multiply forms. Each is per-lane, so unlike the

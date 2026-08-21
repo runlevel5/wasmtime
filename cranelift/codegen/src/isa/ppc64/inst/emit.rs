@@ -149,6 +149,9 @@ fn vx_xo(op: VecAluOp, ty: Type) -> u32 {
         64 => 3,
         _ => unreachable!("vector lane width {ty}"),
     };
+    if matches!(op, VecAluOp::MulOddWordU | VecAluOp::RotlDword) {
+        assert_eq!(lane, 64, "{op:?} produces or operates on doubleword lanes");
+    }
     if matches!(op, VecAluOp::MulWord) {
         assert_eq!(lane, 32, "vmuluwm is a word-lane multiply");
     }
@@ -207,6 +210,9 @@ fn vx_xo(op: VecAluOp, ty: Type) -> u32 {
         VecAluOp::PackUU => [0, 142, 206, 1230],
         // `vmuluwm` is word-only.
         VecAluOp::MulWord => [0, 0, 137, 0],
+        // Doubleword result, word sources.
+        VecAluOp::MulOddWordU => [0, 0, 0, 136],
+        VecAluOp::RotlDword => [0, 0, 0, 196],
         VecAluOp::And | VecAluOp::Or | VecAluOp::Xor | VecAluOp::Nor => {
             unreachable!("{op:?} is emitted as a VSX logical, not a VX form")
         }

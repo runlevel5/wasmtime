@@ -417,6 +417,9 @@ mod tests {
         assert_eq!(enc_va(2, 3, 4, 5, 34), 0x1043_2162); // vmladduhm
         assert_eq!(enc_va(2, 3, 4, 5, 40), 0x1043_2168); // vmsumshm
         assert_eq!(enc_va(2, 3, 4, 5, 33), 0x1043_2161); // vmhraddshs
+        assert_eq!(enc_vx(2, 3, 4, 136), 0x1043_2088); // vmulouw
+        assert_eq!(enc_vx(2, 3, 4, 196), 0x1043_20C4); // vrld
+        assert_eq!(enc_vx(2, 3, 4, 1476), 0x1043_25C4); // vsld (already used)
         // Shift-by-immediate forms, all verified against llvm-mc.
         assert_eq!(enc_md(4, 3, 7, 56, 1), 0x7883_3E24); // sldi r3, r4, 7
         assert_eq!(enc_md(4, 3, 57, 7, 0), 0x7883_C9C2); // srdi r3, r4, 7

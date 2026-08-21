@@ -1015,6 +1015,8 @@ impl Inst {
                     VecAluOp::PackSU => "vpk_su",
                     VecAluOp::PackUU => "vpk_uu",
                     VecAluOp::MulWord => "vmuluwm",
+                    VecAluOp::MulOddWordU => "vmulouw",
+                    VecAluOp::RotlDword => "vrld",
                     VecAluOp::And => "xxland",
                     VecAluOp::Or => "xxlor",
                     VecAluOp::Xor => "xxlxor",
