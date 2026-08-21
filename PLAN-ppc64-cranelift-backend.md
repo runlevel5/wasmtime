@@ -866,6 +866,34 @@ Direct instruction mappings, plus one design correction worth keeping:
 Note: POWER9's `/tmp` is quota-exhausted; scratch files must go in
 `~/tmp` there.
 
+#### Batch 6 (2026-08-21): widening and narrowing — predicted hazard, no fixes
+
+The one batch where the endianness trap was called in advance and the
+paper derivation got it right first time. LE lane i is BE element
+15-i, so `vupkhsb` (BE elements 0-7) is CLIF's `swiden_high` and
+`vupklsb` is `swiden_low` -- **the names invert**. Likewise a pack's
+first operand lands in the LE *high* lanes, so `snarrow(x, y)` passes
+its operands swapped. Both derivations are written into the rules, not
+just their conclusions, because "the names are backwards" is a claim a
+reader should distrust without the argument.
+
+This mattered because an inversion here yields *plausible* wrong
+answers -- widening the wrong half still returns a well-formed vector
+of the correct type. The asymmetric test values confirm the choice
+rather than merely failing to contradict it.
+
+Other notes: there are no unsigned unpack instructions, so unsigned
+widening interleaves with a zero vector (pairing a lane with a
+same-width zero lane *is* a zero-extension). Everything is selected by
+the **source** lane width, so the impossible cases differ per family
+(no doubleword widen source, no byte pack source) -- both declined at
+lowering per the batch-5 rule.
+
+19/19 upstream tests passed first contact, including the ten
+`simd-i{add,sub}-*widen-*` files whose `-mix` variants pair a low
+widen with a high widen in one expression. 83 upstream runtests now
+execute on hardware.
+
 Still unimplemented, blocking further upstream tests: 64-bit vector
 types (`i8x8`, `i32x2`, `f32x2`), `bitcast` to `i128`, widening and
 narrowing, `shuffle`/`swizzle`, saturating arithmetic, `fmin`/`fmax`
