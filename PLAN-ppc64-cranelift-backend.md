@@ -1125,56 +1125,82 @@ that way) and compare raw bits through a bitcast, so the payload is
 actually checked rather than merely NaN-ness. Enables four upstream
 vector min/max tests.
 
-#### 64-bit vector types — closed as a declared gap (2026-08-24)
+#### Batch 15 (2026-08-24): 64-bit vector types
 
-`i8x8`, `i16x4`, `i32x2`, `f32x2` and friends **will not be
-implemented**, and the reasoning is worth keeping because the item had
-been carried as "blocking further upstream tests" since batch 10.
+Implemented, at Trung's direction, for parity with aarch64. The
+analysis that had argued against it stands on the facts and was wrong
+on the priority: wasm genuinely never produces these types (the
+frontend refers to `I8X16` fifty times and to any 64-bit vector type
+zero times) and s390x genuinely does not support them, but parity with
+the most capable backend is the goal, so they are in.
 
-Evidence gathered before deciding:
+**Representation: big-endian doubleword 0**, the bit positions the
+*high* lanes of the corresponding 128-bit type occupy, with the other
+doubleword undefined. That half was picked because three things then
+come out exactly right instead of needing fixups:
 
-- **wasm never produces them.** The wasm-to-CLIF frontend
-  (`crates/cranelift/`) refers to `I8X16` fifty times and to any
-  64-bit vector type *zero* times. wasm SIMD is v128-only, so this is
-  worth nothing to the wasmtime use case that Tier 3 is about.
-- **s390x does not support them either**, and it is the closest
-  analogue to this backend: a 128-bit-only vector unit on a
-  big-endian-heritage target. Its `rc_for_type` accepts vectors only
-  when `ty.bits() == 128`, exactly as ours does.
-- **Upstream does not expect them.** None of the eighteen runtests that
-  use these types lists `s390x` as a target; they are gated to
-  aarch64, riscv64-with-V, and x86_64 only.
-- **ELFv2 has no 8-byte vector type**, so unlike every other ABI
-  question in this backend there is no native convention to match --
-  any choice would be invented and unverifiable against GCC or Clang.
+- `mfvsrd`/`mtvsrd` move precisely that doubleword, and within it lane
+  0 is in the least-significant bits, so a bitcast to or from a 64-bit
+  scalar is one instruction.
+- A little-endian doubleword load puts memory byte j at big-endian byte
+  7 - j, which is exactly where lane j lives — memory order and lane
+  order agree with no permute. Worth stressing this was *derived and
+  then tested*, not assumed; the mirror choice (doubleword 1) would
+  have needed a permute on every load, store and bitcast.
+- Lane-wise instructions do not care where the lanes sit, only how wide
+  they are, and the MInst's type already says. So all the lane-wise
+  rules are shared with the 128-bit ones via a `ty_vec_any` guard.
 
-Cost, for the record: the eighteen tests need about twenty op families,
-including the awkward ones -- `vall_true`/`vany_true` and
-`iadd_pairwise`, the four widening ops, `scalar_to_vector`, and
-`bitcast` across widths. Worse than the op count, it would introduce a
-new cross-cutting invariant ("the upper 64 bits of the register are
-undefined") that every reduction and widening rule would have to
-respect. That is the same class of invariant as the f32-held-widened-in-
-an-FPR decision, which already cost a debugging session when a spill
-copied the wrong width -- and this one would buy nothing for wasm.
+Only three kinds of operation must know:
 
-The gap is **safe**: `rc_for_type` returns a clean
-`Unsupported("type not yet supported by the ppc64 backend: i8x8")`
-compile error rather than panicking, verified. Nothing miscompiles;
-these types simply cannot be compiled.
+1. **Reductions** read the meaningful doubleword into a GPR. Cheaper
+   than masking the undefined half, and impossible to get subtly wrong.
+   `vany_true` needs no lane compare at all — some lane is non-zero
+   exactly when the doubleword is.
+2. **Pairwise addition** uses the batch-10 trick (a pair of adjacent
+   lanes is one lane of the next width up) but must first gather both
+   operands' doublewords into one register with `xxpermdi`, because the
+   pack reads whole registers. At 128 bits the two could be packed
+   against each other directly.
+3. **Widening** meets the big-endian naming inversion from the other
+   side: since the data is in BE doubleword 0, the *High* unpack and
+   merge forms are the ones that see it — for both signednesses and
+   both halves. So `swiden_high` is a bare `vupkhsb` and `swiden_low`
+   is that plus a doubleword swap.
 
-Reversible if a non-wasm Cranelift user ever needs them. The
-representation to pick would be "value in the low doubleword, upper
-doubleword undefined", with masking in the reductions.
+**Three gaps at 128 bits surfaced only when these tests ran**, and are
+fixed here too: vector `fma` (VSX has only accumulating multiply-adds,
+so the addend is also the destination — tied with a regalloc
+reuse-def, and the runtest deliberately keeps the addend live
+afterwards to force the copy), vector `fcopysign`, and `avg_round` on
+`i64x2`, which has no instruction and uses
+`(a | b) - ((a ^ b) >> 1)` — chosen because no intermediate is ever
+wider than a lane, so the carry that would overflow a doubleword add
+never has to be represented.
 
-**Follow-up now unblocked:** `supports_simd` for `Powerpc64le` in
+**Process lesson worth keeping: the local runtest pass was
+meaningless here.** On a non-ppc64 host, `test run` skips compilation
+entirely when host and target differ, so sixteen test files "passed"
+locally while four distinct unimplemented-op failures were waiting on
+the POWER9 (`fcmp.f32x2`, `fadd.f32x2`, `vconst.i8x8`, and
+`avg_round.i64x2`). The `vconst` one is the subtle one:
+`u128_from_constant` requires exactly sixteen bytes and silently
+returns `None` for a 64-bit constant pool entry, so the rule never
+matched — a wrong-looking extractor, not a wrong instruction. For any
+batch touching new *types*, the hardware run is the first real check,
+not the last.
+
+Not included: 16- and 32-bit vectors (`i8x2`, `i16x2`), which
+`simd-small.clif` also needs, so that file stays disabled. Extending
+the same scheme downward would mean either a shift on every scalar
+bitcast or a second placement convention; worth doing only if
+something actually wants those types.
+
+**Follow-up still open:** `supports_simd` for `Powerpc64le` in
 `cranelift/fuzzgen/src/target_isa_extras.rs` is still `false` from when
-there were no vector lowerings at all. fuzzgen's type pool contains
-only 128-bit vectors (`I8X16`, `I16X8`, `I32X4`, `I64X2`, `F32X4`,
-`F64X2`) -- no 64-bit ones -- so flipping it to `true` once the v128
-grid is complete will not run into the gap above. Worth doing at the
-end of Phase 5, not before, since fuzzgen would otherwise spend its
-budget on unimplemented ops.
+there were no vector lowerings. fuzzgen's type pool holds only 128-bit
+vectors, so flipping it will not reach the 16/32-bit gap above. Worth
+doing once the v128 grid is complete.
 
 ### Phase 6 — Tuning
 
