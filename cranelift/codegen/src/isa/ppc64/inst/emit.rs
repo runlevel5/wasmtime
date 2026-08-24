@@ -233,7 +233,11 @@ fn vx_xo(op: VecAluOp, ty: Type) -> u32 {
         VecAluOp::PackMod => [0, 14, 78, 1102],
         VecAluOp::MergeEvenWord => [0, 0, 1932, 0],
         VecAluOp::RotlDword => [0, 0, 0, 196],
-        VecAluOp::And | VecAluOp::Or | VecAluOp::Xor | VecAluOp::Nor => {
+        VecAluOp::And
+        | VecAluOp::Or
+        | VecAluOp::Xor
+        | VecAluOp::Nor
+        | VecAluOp::AndC => {
             unreachable!("{op:?} is emitted as a VSX logical, not a VX form")
         }
     };
@@ -1673,6 +1677,7 @@ impl MachInstEmit for Inst {
                     VecAluOp::Or => enc_xx3(d, a, b, 146),
                     VecAluOp::Xor => enc_xx3(d, a, b, 154),
                     VecAluOp::Nor => enc_xx3(d, a, b, 162),
+                    VecAluOp::AndC => enc_xx3(d, a, b, 138),
                     _ => {
                         // VMX forms, VR numbers only.
                         let (d, a, b) = (d - 32, a - 32, b - 32);
@@ -1785,6 +1790,7 @@ impl MachInstEmit for Inst {
                 let xo = match op {
                     VecAluOp4::MulAddUH => 34,
                     VecAluOp4::MulHiRoundAddSHS => 33,
+                    VecAluOp4::Perm => 43,
                 };
                 sink.put4(enc_va(
                     vsr_num(rd.to_reg()) - 32,

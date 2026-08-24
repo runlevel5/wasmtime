@@ -590,3 +590,100 @@ block0(v0: i32x4):
 ;   addi r1, r1, 0x10
 ;   blr
 
+
+function %swizzle(i8x16, i8x16) -> i8x16 {
+block0(v0: i8x16, v1: i8x16):
+    v2 = swizzle v0, v1
+    return v2
+}
+
+; VCode:
+;   mflr r0
+;   load_addr sp, -16(sp)
+;   std r0, 8(sp)
+;   std fp, 0(sp)
+;   mr fp, sp
+; block0:
+;   vspltis8 v4, 15
+;   vsub8 v5, v4, v3
+;   vcmpgtu8 v7, v3, v4
+;   vperm v9, v2, v2, v5
+;   xxlandc v2, v9, v7
+;   ld r0, 8(sp)
+;   mtlr r0
+;   ld fp, 0(sp)
+;   load_addr sp, 16(sp)
+;   blr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   mflr r0
+;   addi r1, r1, -0x10
+;   std r0, 8(r1)
+;   std r31, 0(r1)
+;   ori r31, r1, 0
+; block1: ; offset 0x14
+;   vspltisb v4, 0xf
+;   vsububm v5, v4, v3
+;   vcmpgtub v7, v3, v4
+;   vperm v9, v2, v2, v5
+;   xxlandc v2, v9, v7
+;   ld r0, 8(r1)
+;   mtlr r0
+;   ld r31, 0(r1)
+;   addi r1, r1, 0x10
+;   blr
+
+function %shuffle(i8x16, i8x16) -> i8x16 {
+block0(v0: i8x16, v1: i8x16):
+    v2 = shuffle v0, v1, [0 16 1 17 2 18 3 19 4 20 5 21 6 22 7 23]
+    return v2
+}
+
+; VCode:
+;   mflr r0
+;   load_addr sp, -16(sp)
+;   std r0, 8(sp)
+;   std fp, 0(sp)
+;   mr fp, sp
+; block0:
+;   load_const r3, 0xc1c0d1d0e1e0f1f
+;   load_const r5, 0x81809190a1a0b1b
+;   mtvsrd v7, r5
+;   mtvsrd v9, r3
+;   xxpermdi v11, v7, v9, 0
+;   vperm v2, v3, v2, v11
+;   ld r0, 8(sp)
+;   mtlr r0
+;   ld fp, 0(sp)
+;   load_addr sp, 16(sp)
+;   blr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   mflr r0
+;   addi r1, r1, -0x10
+;   std r0, 8(r1)
+;   std r31, 0(r1)
+;   ori r31, r1, 0
+; block1: ; offset 0x14
+;   lis r3, 0xc1c
+;   ori r3, r3, 0xd1d
+;   sldi r3, r3, 0x20
+;   oris r3, r3, 0xe1e
+;   ori r3, r3, 0xf1f
+;   lis r5, 0x818
+;   ori r5, r5, 0x919
+;   sldi r5, r5, 0x20
+;   oris r5, r5, 0xa1a
+;   ori r5, r5, 0xb1b
+;   mtvsrd v7, r5
+;   mtvsrd v9, r3
+;   xxmrghd v11, v7, v9
+;   vperm v2, v3, v2, v11
+;   ld r0, 8(r1)
+;   mtlr r0
+;   ld r31, 0(r1)
+;   addi r1, r1, 0x10
+;   blr
+

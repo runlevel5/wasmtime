@@ -338,6 +338,7 @@ mod tests {
         assert_eq!(enc_xx3(34, 34, 34, 154), 0xF042_14D7); // xxlxor vs34, vs34, vs34
         assert_eq!(enc_xx3(34, 35, 36, 130), 0xF043_2417); // xxland vs34, vs35, vs36
         assert_eq!(enc_xx3(34, 35, 36, 162), 0xF043_2517); // xxlnor vs34, vs35, vs36
+        assert_eq!(enc_xx3(34, 35, 36, 138), 0xF043_2457); // xxlandc vs34, vs35, vs36
         assert_eq!(enc_vx(2, 3, 4, 0), 0x1043_2000); // vaddubm v2, v3, v4
         assert_eq!(enc_vx(2, 3, 4, 64), 0x1043_2040); // vadduhm v2, v3, v4
         assert_eq!(enc_vx(2, 3, 4, 128), 0x1043_2080); // vadduwm v2, v3, v4
@@ -417,6 +418,7 @@ mod tests {
         assert_eq!(enc_va(2, 3, 4, 5, 34), 0x1043_2162); // vmladduhm
         assert_eq!(enc_va(2, 3, 4, 5, 40), 0x1043_2168); // vmsumshm
         assert_eq!(enc_va(2, 3, 4, 5, 33), 0x1043_2161); // vmhraddshs
+        assert_eq!(enc_va(2, 3, 4, 5, 43), 0x1043_216B); // vperm
         assert_eq!(enc_vx(2, 3, 4, 136), 0x1043_2088); // vmulouw
         assert_eq!(enc_vx(2, 3, 4, 196), 0x1043_20C4); // vrld
         assert_eq!(enc_vx(2, 3, 4, 1476), 0x1043_25C4); // vsld (already used)

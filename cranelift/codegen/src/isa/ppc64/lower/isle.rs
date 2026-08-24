@@ -236,6 +236,21 @@ impl generated_code::Context for Ppc64IsleContext<'_, '_, MInst, Ppc64Backend> {
         ty.lane_bits() > 8
     }
 
+    /// Complement each byte of a `shuffle` mask against 31. CLIF
+    /// numbers the bytes of the two-vector concatenation from the
+    /// little end, `vperm` from the big end, and the two orders are
+    /// reflections of each other -- which is also why the lowering
+    /// rule hands `vperm` its sources in the opposite order. The
+    /// verifier has already rejected any index above 31.
+    fn shuffle_ctrl(&mut self, mask: u128) -> u128 {
+        let mut ctrl = 0u128;
+        for j in 0..16 {
+            let index = (mask >> (8 * j)) as u8 & 31;
+            ctrl |= u128::from(31 - index) << (8 * j);
+        }
+        ctrl
+    }
+
     fn vconst_lo64(&mut self, n: u128) -> u64 {
         n as u64
     }

@@ -1425,17 +1425,13 @@
 
 ;;;; Constants
 
-(rule 1 (lower (vconst (ty_vec128 _) (u128_from_constant n)))
-  (if-let true (u128_is_zero n))
-  (output_reg (vec_zero)))
-
-;; The general case goes through the GPRs: two 64-bit halves, `mtvsrd`
-;; into big-endian doubleword 0 of two scratch vectors, then `xxpermdi`
-;; pairs them with the high half in BE doubleword 0 (the high lanes).
-(rule 0 (lower (vconst (ty_vec128 _) (u128_from_constant n)))
-  (let ((lo Reg (imm $I64 (vconst_lo64 n)))
-        (hi Reg (imm $I64 (vconst_hi64 n))))
-    (output_reg (vec_permdi (mov_to_vec hi) (mov_to_vec lo) 0))))
+;; Zero comes free; the general case goes through the GPRs: two 64-bit
+;; halves, `mtvsrd` into big-endian doubleword 0 of two scratch vectors,
+;; then `xxpermdi` pairs them with the high half in BE doubleword 0 (the
+;; high lanes). Both live in `vec_const`, which the permute-control
+;; vector below also uses.
+(rule (lower (vconst (ty_vec128 _) (u128_from_constant n)))
+  (output_reg (vec_const n)))
 
 ;;;; Splats
 
@@ -2007,3 +2003,49 @@
 (rule (lower (fvpromote_low _ x @ (value_type $F32X4)))
   (let ((spread Reg (vec_alu_rrr (VecAluOp.MergeLow) (put_in_reg x) (vec_zero) $I32X4)))
     (output_reg (vec_cvt (VecCvtOp.F32ToF64) spread))))
+
+;;;; Byte permutes: `shuffle` and `swizzle` ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; `vperm` concatenates its two sources into a 32-byte value and takes
+;; one byte of it per control byte, using only the low five bits. The
+;; catch is that the concatenation is numbered from the big end, while
+;; CLIF numbers both its lanes and its shuffle indices from the little
+;; end -- and over 32 bytes those two orders are exact reflections,
+;; index k against 31 - k. Reflecting the index also swaps which half
+;; of the concatenation it lands in, so the sources have to be passed
+;; in the opposite order to compensate.
+;;
+;; POWER9 adds `vpermr`, the same permute with the little-endian index
+;; convention, which would remove both adjustments. It buys nothing
+;; here -- the reflection is constant-folded for `shuffle` and shares
+;; an instruction with the bounds check for `swizzle` -- so the POWER8
+;; sequences below are used unconditionally.
+
+;; The mask is an immediate, so its reflection costs nothing at all and
+;; a shuffle is a single permute against a materialized control vector.
+(rule (lower (shuffle _ a b (u128_from_immediate mask)))
+  (output_reg (vec_alu_rrrr (VecAluOp4.Perm)
+                            (put_in_reg b)
+                            (put_in_reg a)
+                            (vec_const (shuffle_ctrl mask)))))
+
+;; `swizzle` indexes one vector with a *runtime* index vector and must
+;; produce zero wherever an index is outside 0..15, reading the indices
+;; as unsigned. Two separate hazards come from `vperm` here: indices
+;; 16..31 would select the second source, and indices of 32 or more
+;; would have their high bits dropped and alias back into range. Both
+;; are covered by masking the result, which lets the same comparison
+;; against 15 serve as the bounds check, and lets the permute take the
+;; single source twice.
+;;
+;; The control bytes are 15 - idx rather than 31 - idx because the
+;; wanted byte now lies in the *first* source: reflecting an index
+;; within one 16-byte half is a complement against 15.
+(rule (lower (swizzle _ src idx))
+  (let ((s Reg (put_in_reg src))
+        (i Reg (put_in_reg idx))
+        (fifteen Reg (vec_splt_imm 15 $I8X16))
+        (ctrl Reg (vec_alu_rrr (VecAluOp.Sub) fifteen i $I8X16))
+        (oob Reg (vec_alu_rrr (VecAluOp.CmpGtU) i fifteen $I8X16))
+        (picked Reg (vec_alu_rrrr (VecAluOp4.Perm) s s ctrl)))
+    (output_reg (vec_alu_rrr (VecAluOp.AndC) picked oob $I8X16))))

@@ -1033,9 +1033,14 @@ impl Inst {
                     VecAluOp::Or => "xxlor",
                     VecAluOp::Xor => "xxlxor",
                     VecAluOp::Nor => "xxlnor",
+                    VecAluOp::AndC => "xxlandc",
                 };
                 match op {
-                    VecAluOp::And | VecAluOp::Or | VecAluOp::Xor | VecAluOp::Nor => {
+                    VecAluOp::And
+                    | VecAluOp::Or
+                    | VecAluOp::Xor
+                    | VecAluOp::Nor
+                    | VecAluOp::AndC => {
                         format!("{mnemonic} {}, {}, {}", wreg(*rd), reg(*ra), reg(*rb))
                     }
                     _ => format!(
@@ -1081,6 +1086,7 @@ impl Inst {
                 let mnemonic = match op {
                     VecAluOp4::MulAddUH => "vmladduhm",
                     VecAluOp4::MulHiRoundAddSHS => "vmhraddshs",
+                    VecAluOp4::Perm => "vperm",
                 };
                 format!(
                     "{mnemonic} {}, {}, {}, {}",

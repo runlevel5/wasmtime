@@ -142,6 +142,8 @@
     (Or)
     (Xor)
     (Nor)
+    ;; `a & ~b`, for clearing lanes a mask has selected.
+    (AndC)
     ;; Lane comparisons, producing an all-ones or all-zeros mask per
     ;; lane, which is exactly CLIF's vector `icmp` result. Only equality
     ;; and greater-than exist in hardware; the lowering rules get the
@@ -223,6 +225,11 @@
     ;; sat((a * b + 0x4000) >> 15) + c per halfword, which is exactly
     ;; CLIF's Q15 saturating rounding multiply when c = 0.
     (MulHiRoundAddSHS)
+    ;; Byte permute: `a` and `b` are concatenated into a 32-byte value
+    ;; and each byte of `c` selects one byte of it, using only the low
+    ;; five bits. Defined in big-endian element terms, which is what
+    ;; makes the lowering rules below reverse the operands.
+    (Perm)
 ))
 
 ;; Single-operand lane operations in VX form (RA field zero).
@@ -1235,6 +1242,22 @@
   (let ((dst WritableReg (temp_writable_reg $I8X16))
         (_ Unit (emit (MInst.VecSplatFpr dst rn is_f32))))
     dst))
+
+;; Materialize a 128-bit vector constant. Little-endian byte j of `n`
+;; becomes lane byte j.
+(decl vec_const (u128) Reg)
+(rule 1 (vec_const n)
+  (if-let true (u128_is_zero n))
+  (vec_zero))
+(rule 0 (vec_const n)
+  (let ((lo Reg (imm $I64 (vconst_lo64 n)))
+        (hi Reg (imm $I64 (vconst_hi64 n))))
+    (vec_permdi (mov_to_vec hi) (mov_to_vec lo) 0)))
+
+;; The `vperm` control vector for a CLIF `shuffle` mask: lane byte j is
+;; 31 - mask[j], the big-endian position of the byte the mask selects.
+(decl shuffle_ctrl (u128) u128)
+(extern constructor shuffle_ctrl shuffle_ctrl)
 
 (decl vec_permdi (Reg Reg u8) Reg)
 (rule (vec_permdi a b dm)

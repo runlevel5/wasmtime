@@ -1,0 +1,107 @@
+test interpret
+test run
+target powerpc64le
+target powerpc64le has_isa_3_0
+
+;; Byte permutes. Every lane holds a distinct value and the masks are
+;; asymmetric on purpose: the lowering reflects each index against 31
+;; and swaps the two sources, so a sign error in either would still
+;; pass a symmetric test.
+
+;; Identity out of the first operand, and out of the second, which is
+;; the pair that catches the operand swap.
+function %shuffle_first(i8x16, i8x16) -> i8x16 {
+block0(v0: i8x16, v1: i8x16):
+    v2 = shuffle v0, v1, [0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15]
+    return v2
+}
+; run: %shuffle_first([0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15], [16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31]) == [0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15]
+
+function %shuffle_second(i8x16, i8x16) -> i8x16 {
+block0(v0: i8x16, v1: i8x16):
+    v2 = shuffle v0, v1, [16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31]
+    return v2
+}
+; run: %shuffle_second([0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15], [16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31]) == [16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31]
+
+;; Reverse: index j takes byte 15 - j, so a mask read in the wrong
+;; direction returns the input unchanged.
+function %shuffle_reverse(i8x16, i8x16) -> i8x16 {
+block0(v0: i8x16, v1: i8x16):
+    v2 = shuffle v0, v1, [15 14 13 12 11 10 9 8 7 6 5 4 3 2 1 0]
+    return v2
+}
+; run: %shuffle_reverse([0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15], [16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31]) == [15 14 13 12 11 10 9 8 7 6 5 4 3 2 1 0]
+
+;; Interleave the two sources, so every lane crosses the 16-byte
+;; boundary that the reflection moves.
+function %shuffle_interleave(i8x16, i8x16) -> i8x16 {
+block0(v0: i8x16, v1: i8x16):
+    v2 = shuffle v0, v1, [0 16 1 17 2 18 3 19 4 20 5 21 6 22 7 23]
+    return v2
+}
+; run: %shuffle_interleave([0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15], [16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31]) == [0 16 1 17 2 18 3 19 4 20 5 21 6 22 7 23]
+
+;; A single byte broadcast from each end of the concatenation.
+function %shuffle_splat_low(i8x16, i8x16) -> i8x16 {
+block0(v0: i8x16, v1: i8x16):
+    v2 = shuffle v0, v1, [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0]
+    return v2
+}
+; run: %shuffle_splat_low([7 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15], [16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31]) == [7 7 7 7 7 7 7 7 7 7 7 7 7 7 7 7]
+
+function %shuffle_splat_high(i8x16, i8x16) -> i8x16 {
+block0(v0: i8x16, v1: i8x16):
+    v2 = shuffle v0, v1, [31 31 31 31 31 31 31 31 31 31 31 31 31 31 31 31]
+    return v2
+}
+; run: %shuffle_splat_high([0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15], [16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 99]) == [99 99 99 99 99 99 99 99 99 99 99 99 99 99 99 99]
+
+;; An arbitrary asymmetric mask mixing both sources.
+function %shuffle_mixed(i8x16, i8x16) -> i8x16 {
+block0(v0: i8x16, v1: i8x16):
+    v2 = shuffle v0, v1, [3 30 0 17 9 9 25 1 15 16 8 22 2 31 11 20]
+    return v2
+}
+; run: %shuffle_mixed([0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15], [16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31]) == [3 30 0 17 9 9 25 1 15 16 8 22 2 31 11 20]
+
+;; Whole-word moves, the shape wasm's 32-bit shuffles reduce to: each
+;; group of four indices is contiguous, so a byte-order mistake inside
+;; a word would show up as a scrambled lane rather than a wrong one.
+function %shuffle_words(i32x4, i32x4) -> i32x4 {
+block0(v0: i32x4, v1: i32x4):
+    v2 = bitcast.i8x16 little v0
+    v3 = bitcast.i8x16 little v1
+    v4 = shuffle v2, v3, [12 13 14 15 0 1 2 3 20 21 22 23 8 9 10 11]
+    v5 = bitcast.i32x4 little v4
+    return v5
+}
+; run: %shuffle_words([1 2 3 4], [5 6 7 8]) == [4 1 6 3]
+
+;; `swizzle` reads its indices at run time and must give zero for
+;; anything outside 0..15. The three ways that can happen are all
+;; distinct hazards in the lowering: 16..31 would otherwise select the
+;; second permute source, 32 and above would have its high bits
+;; dropped and alias back into range, and a byte with the top bit set
+;; must be read as large-unsigned rather than negative.
+function %swizzle_identity(i8x16, i8x16) -> i8x16 {
+block0(v0: i8x16, v1: i8x16):
+    v2 = swizzle v0, v1
+    return v2
+}
+; run: %swizzle_identity([0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15], [0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15]) == [0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15]
+; run: %swizzle_identity([100 101 102 103 104 105 106 107 108 109 110 111 112 113 114 115], [15 14 13 12 11 10 9 8 7 6 5 4 3 2 1 0]) == [115 114 113 112 111 110 109 108 107 106 105 104 103 102 101 100]
+; run: %swizzle_identity([100 101 102 103 104 105 106 107 108 109 110 111 112 113 114 115], [0 0 0 0 3 3 3 3 15 15 15 15 7 7 7 7]) == [100 100 100 100 103 103 103 103 115 115 115 115 107 107 107 107]
+
+;; Indices 16..31: the region that would come from the second source.
+; run: %swizzle_identity([100 101 102 103 104 105 106 107 108 109 110 111 112 113 114 115], [16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31]) == [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0]
+
+;; Indices 32 and above, which alias back into 0..15 under a five-bit
+;; permute: 32 would read lane 0, 47 would read lane 15.
+; run: %swizzle_identity([100 101 102 103 104 105 106 107 108 109 110 111 112 113 114 115], [32 33 40 47 48 63 64 100 127 200 250 255 16 31 17 30]) == [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0]
+
+;; A mix of in-range and every flavour of out-of-range in one vector.
+; run: %swizzle_identity([100 101 102 103 104 105 106 107 108 109 110 111 112 113 114 115], [0 16 1 32 2 255 3 128 4 64 5 17 6 31 7 200]) == [100 0 101 0 102 0 103 0 104 0 105 0 106 0 107 0]
+
+;; The boundary itself, from both sides.
+; run: %swizzle_identity([100 101 102 103 104 105 106 107 108 109 110 111 112 113 114 115], [15 16 15 16 15 16 15 16 15 16 15 16 15 16 15 16]) == [115 0 115 0 115 0 115 0 115 0 115 0 115 0 115 0]
