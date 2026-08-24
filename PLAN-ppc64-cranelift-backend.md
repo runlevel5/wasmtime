@@ -1202,6 +1202,65 @@ there were no vector lowerings. fuzzgen's type pool holds only 128-bit
 vectors, so flipping it will not reach the 16/32-bit gap above. Worth
 doing once the v128 grid is complete.
 
+#### Batch 16 (2026-08-24): aarch64 parity sweep
+
+Rather than guess at what was missing, every runtest that aarch64 runs
+and this backend did not (113 files) was enabled at once and the POWER9
+asked what broke. That turned a vague "what's left?" into a bounded
+list of nine operations — and found a bug that no amount of reading
+would have.
+
+**A miscompilation in already-shipped code.** `smulhi`/`umulhi` on a
+type narrower than a word extended both operands and took the high half
+of a *32-bit* product, but the wanted half is the high half of *that
+type's* width. `umulhi.i8(255, 255)` is `0xFE01 >> 8` = 254; taking a
+word's high half gives 0. It compiled cleanly and returned wrong
+answers. Narrow cases now form the whole product in a doubleword — two
+extended 16-bit values cannot overflow one — and shift down by the
+type's width. **Enabling other backends' tests is a bug-finding
+technique, not just a coverage exercise.**
+
+**A second latent bug, same shape.** The new overflow rules first used
+`put_in_ext_reg`, which deliberately does *not* extend an `i32` because
+the word-wide instructions it feeds read the low word in full. These
+checks compare whole doublewords, so they read the register's undefined
+upper half and reported overflow at random — visibly for the signed
+cases, and only by luck of the garbage being zero for the unsigned
+ones. Helpers that promise less than their name suggests are worth
+reading before reuse; that one is now gone, having no other callers.
+
+Operations added: `bitcast` between `i128` and a vector; vector `ineg`,
+`select` and `scalar_to_vector`; `imul` on `i8x16`, `i16x4` and
+`i32x2`; all six overflow-detecting arithmetic ops at every width, with
+128-bit for the adds and subtracts; sub-word float-to-integer
+conversions; and `vhigh_bits`.
+
+Three of those are worth remembering:
+
+- **`imul.i8x16`** has no instruction. The even/odd forms give halfword
+  products of alternating lanes and each wanted byte is the low byte of
+  one, but they must be *interleaved* — a truncating pack concatenates
+  the even lanes' bytes and then the odd lanes', a de-interleaved
+  order, which was the first version's bug.
+- **Overflow flags recompute rather than read XER.** Reading the carry
+  and overflow bits back costs about what recomputing the condition
+  costs, and recomputation composes with the existing
+  compare-into-a-GPR machinery. Only the 128-bit carry chain reads XER,
+  via `addze` of zero, where there is no cheap alternative.
+- **`vhigh_bits` is one `vbpermq`.** It gathers sixteen arbitrary bits
+  named by an index vector; the instruction sends the bit chosen by
+  index byte `i` to result weight `2^(15-i)`, so lane `j` is named by
+  byte `15-j`, and a lane's sign bit sits at big-endian bit
+  `w*(n-1-j)`. Bytes with no lane to name are set above 127, which the
+  instruction gathers as zero.
+
+**Result: 346 runtests enabled for ppc64le against aarch64's 335.** The
+24 files still aarch64-only are 13 other architectures' own regression
+tests (`*-aarch64.clif`, `x64-bmi*`, `riscv64-vstate`, the Apple ABI
+one) and 11 needing one of four declared type gaps: **f16**, **f128**,
+**dynamic vector types**, and **sub-64-bit vectors** (`i8x2`, `i16x2`).
+There are no remaining *operation* gaps against aarch64.
+
 ### Phase 6 — Tuning
 
 POWER9/10 fast paths (`isel`, `setb`, mod instructions, P10 pcrel to kill
