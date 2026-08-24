@@ -236,6 +236,18 @@ impl generated_code::Context for Ppc64IsleContext<'_, '_, MInst, Ppc64Backend> {
         ty.lane_bits() > 8
     }
 
+    /// Matches any vector type that fits in one register: 128-bit, or
+    /// the 64-bit types held in big-endian doubleword 0. For rules
+    /// whose instruction is position-independent and depends only on
+    /// the lane width, which the returned type still carries.
+    fn ty_vec_any(&mut self, ty: Type) -> Option<Type> {
+        if ty.is_vector() && (ty.bits() == 128 || ty.bits() == 64) {
+            Some(ty)
+        } else {
+            None
+        }
+    }
+
     /// Complement each byte of a `shuffle` mask against 31. CLIF
     /// numbers the bytes of the two-vector concatenation from the
     /// little end, `vperm` from the big end, and the two orders are

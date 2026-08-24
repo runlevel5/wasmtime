@@ -4,6 +4,7 @@ target aarch64
 set enable_multi_ret_implicit_sret
 target riscv64 has_v
 target riscv64 has_v has_c has_zcb
+target powerpc64le
 
 function %iaddp_i8x8(i8x8, i8x8) -> i8x8 {
 block0(v0: i8x8, v1: i8x8):

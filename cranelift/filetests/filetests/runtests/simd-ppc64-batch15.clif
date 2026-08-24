@@ -1,0 +1,169 @@
+test interpret
+test run
+target powerpc64le
+target powerpc64le has_isa_3_0
+
+;; 64-bit vectors, which this backend keeps in big-endian doubleword 0
+;; of a vector register. Every value below is asymmetric across lanes,
+;; because the whole risk in that representation is a half-register or
+;; lane-order mistake, and symmetric data hides exactly that.
+
+;; A round trip through memory is the sharpest test of the claim that
+;; memory order and lane order agree: lane 0 must come from the lowest
+;; address, and only eight bytes may be touched.
+function %roundtrip_i8x8(i8x8) -> i8x8 {
+    ss0 = explicit_slot 16
+
+block0(v0: i8x8):
+    v1 = stack_addr.i64 ss0
+    store.i8x8 v0, v1
+    v2 = load.i8x8 v1
+    return v2
+}
+; run: %roundtrip_i8x8([1 2 3 4 5 6 7 8]) == [1 2 3 4 5 6 7 8]
+; run: %roundtrip_i8x8([-1 2 -3 4 -5 6 -7 8]) == [-1 2 -3 4 -5 6 -7 8]
+
+;; Storing a 64-bit vector must not disturb the eight bytes above it.
+;; The guard value is written first, then the vector, then the guard is
+;; read back; a 16-byte store would have destroyed it.
+function %store_touches_8_bytes(i8x8, i64) -> i64 {
+    ss0 = explicit_slot 16
+
+block0(v0: i8x8, v1: i64):
+    v2 = stack_addr.i64 ss0
+    store.i64 v1, v2+8
+    store.i8x8 v0, v2
+    v3 = load.i64 v2+8
+    return v3
+}
+; run: %store_touches_8_bytes([1 2 3 4 5 6 7 8], 0x0123456789abcdef) == 0x0123456789abcdef
+; run: %store_touches_8_bytes([-1 -1 -1 -1 -1 -1 -1 -1], 0x5555555555555555) == 0x5555555555555555
+
+;; Lane order seen from a scalar: lane 0 is the least-significant byte.
+function %i8x8_to_i64(i8x8) -> i64 {
+block0(v0: i8x8):
+    v1 = bitcast.i64 little v0
+    return v1
+}
+; run: %i8x8_to_i64([1 2 3 4 5 6 7 8]) == 0x0807060504030201
+
+;; (The reverse direction, `bitcast` *to* a 64-bit vector, is exercised
+;; by the upstream `simd-small.clif` under `test run`; the interpreter
+;; does not implement it, which is why that file has no
+;; `test interpret` line either.)
+
+function %i16x4_to_i64(i16x4) -> i64 {
+block0(v0: i16x4):
+    v1 = bitcast.i64 little v0
+    return v1
+}
+; run: %i16x4_to_i64([0x1122 0x3344 0x5566 0x7788]) == 0x7788556633441122
+
+;; A load feeding lane-wise arithmetic: this is where a wrong half would
+;; show up as arithmetic on undefined data rather than as a bad lane.
+function %load_then_add(i32x2, i32x2) -> i32x2 {
+    ss0 = explicit_slot 16
+
+block0(v0: i32x2, v1: i32x2):
+    v2 = stack_addr.i64 ss0
+    store.i32x2 v0, v2
+    v3 = load.i32x2 v2
+    v4 = iadd v3, v1
+    return v4
+}
+; run: %load_then_add([1 2], [10 20]) == [11 22]
+; run: %load_then_add([-1 0x7fffffff], [1 1]) == [0 0x80000000]
+
+;; The reductions must ignore the undefined half of the register. A
+;; splat writes all sixteen bytes, so these would pass either way;
+;; feeding them a value that came through memory does not, since then
+;; the other half really is undefined.
+function %alltrue_from_memory(i16x4) -> i8 {
+    ss0 = explicit_slot 16
+
+block0(v0: i16x4):
+    v1 = stack_addr.i64 ss0
+    store.i16x4 v0, v1
+    v2 = load.i16x4 v1
+    v3 = vall_true v2
+    return v3
+}
+; run: %alltrue_from_memory([1 1 1 1]) == 1
+; run: %alltrue_from_memory([1 1 0 1]) == 0
+; run: %alltrue_from_memory([-1 -1 -1 -1]) == 1
+
+function %anytrue_from_memory(i16x4) -> i8 {
+    ss0 = explicit_slot 16
+
+block0(v0: i16x4):
+    v1 = stack_addr.i64 ss0
+    store.i16x4 v0, v1
+    v2 = load.i16x4 v1
+    v3 = vany_true v2
+    return v3
+}
+; run: %anytrue_from_memory([0 0 0 0]) == 0
+; run: %anytrue_from_memory([0 0 1 0]) == 1
+
+;; Widening: `_low` and `_high` must pick the correct four source lanes.
+;; With ascending input, swapping them is immediately visible.
+function %swiden_low_i8x8(i8x8) -> i16x4 {
+block0(v0: i8x8):
+    v1 = swiden_low v0
+    return v1
+}
+; run: %swiden_low_i8x8([1 2 3 4 5 6 7 8]) == [1 2 3 4]
+; run: %swiden_low_i8x8([-1 -2 -3 -4 5 6 7 8]) == [-1 -2 -3 -4]
+
+function %swiden_high_i8x8(i8x8) -> i16x4 {
+block0(v0: i8x8):
+    v1 = swiden_high v0
+    return v1
+}
+; run: %swiden_high_i8x8([1 2 3 4 5 6 7 8]) == [5 6 7 8]
+; run: %swiden_high_i8x8([1 2 3 4 -5 -6 -7 -8]) == [-5 -6 -7 -8]
+
+function %uwiden_low_i8x8(i8x8) -> i16x4 {
+block0(v0: i8x8):
+    v1 = uwiden_low v0
+    return v1
+}
+; run: %uwiden_low_i8x8([1 2 3 4 5 6 7 8]) == [1 2 3 4]
+; run: %uwiden_low_i8x8([-1 -2 3 4 5 6 7 8]) == [255 254 3 4]
+
+function %uwiden_high_i8x8(i8x8) -> i16x4 {
+block0(v0: i8x8):
+    v1 = uwiden_high v0
+    return v1
+}
+; run: %uwiden_high_i8x8([1 2 3 4 5 6 7 8]) == [5 6 7 8]
+; run: %uwiden_high_i8x8([1 2 3 4 -5 -6 7 8]) == [251 250 7 8]
+
+;; Pairwise addition concatenates the first operand's sums below the
+;; second's, and this backend gathers both operands' halves into one
+;; register before packing them -- so a swap here is visible.
+function %pairwise_i16x4(i16x4, i16x4) -> i16x4 {
+block0(v0: i16x4, v1: i16x4):
+    v2 = iadd_pairwise v0, v1
+    return v2
+}
+; run: %pairwise_i16x4([1 2 3 4], [100 200 300 400]) == [3 7 300 700]
+
+function %pairwise_i32x2(i32x2, i32x2) -> i32x2 {
+block0(v0: i32x2, v1: i32x2):
+    v2 = iadd_pairwise v0, v1
+    return v2
+}
+; run: %pairwise_i32x2([1 2], [1000 2000]) == [3 3000]
+
+;; Fused multiply-add is destructive on this ISA, so the addend is also
+;; the destination. Keeping the addend live afterwards forces the
+;; register allocator to insert a copy, which is the case most likely to
+;; be got wrong.
+function %fma_f32x2_reuse(f32x2, f32x2, f32x2) -> f32x2 {
+block0(v0: f32x2, v1: f32x2, v2: f32x2):
+    v3 = fma v0, v1, v2
+    v4 = fadd v3, v2
+    return v4
+}
+; run: %fma_f32x2_reuse([0x2.0 0x3.0], [0x4.0 0x5.0], [0x1.0 0x1.0]) == [0xa.0 0x11.0]

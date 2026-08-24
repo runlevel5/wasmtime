@@ -288,6 +288,8 @@
     ;; return, but the fixup covers that case too.)
     (Min)
     (Max)
+    ;; Sign of the first operand, magnitude of the second.
+    (CopySign)
 ))
 
 (type VecFpuOp1
@@ -555,6 +557,17 @@
       (if_set Reg)
       (if_clear Reg)
       (mask Reg))
+
+    ;; Lane-wise fused multiply-add, `rd = ra * rb + rd`. VSX has only
+    ;; the accumulating forms, so the addend is also the destination:
+    ;; `rd` reuses the `rc` operand and the register allocator inserts a
+    ;; copy if the addend is still live afterwards.
+    (VecFpuFma
+      (rd WritableReg)
+      (ra Reg)
+      (rb Reg)
+      (rc Reg)
+      (ty Type))
 
     ;; Reduce a vector to a 0/1 GPR: whether all lanes, or any lane, is
     ;; non-zero. The record form of the equality compare sets CR6, whose
@@ -1182,6 +1195,12 @@
         (_ Unit (emit (MInst.VecRound dst rn mode ty))))
     dst))
 
+(decl vec_fpu_fma (Reg Reg Reg Type) Reg)
+(rule (vec_fpu_fma a b c ty)
+  (let ((dst WritableReg (temp_writable_reg $I8X16))
+        (_ Unit (emit (MInst.VecFpuFma dst a b c ty))))
+    dst))
+
 (decl vec_sel (Reg Reg Reg) Reg)
 (rule (vec_sel if_set if_clear mask)
   (let ((dst WritableReg (temp_writable_reg $I8X16))
@@ -1336,6 +1355,9 @@
 (extern constructor amode amode)
 
 ;; The same address eight bytes on, for the high half of an `i128`.
+(decl ty_vec_any (Type) Type)
+(extern extractor ty_vec_any ty_vec_any)
+
 (decl amode8 (Value i32) AMode)
 (extern constructor amode8 amode8)
 

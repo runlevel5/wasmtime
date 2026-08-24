@@ -386,6 +386,10 @@ mod tests {
         assert_eq!(enc_xx3(34, 35, 36, 232), 0xF043_2747); // xvmindp
         assert_eq!(enc_xx3(34, 35, 36, 192), 0xF043_2607); // xvmaxsp
         assert_eq!(enc_xx3(34, 35, 36, 224), 0xF043_2707); // xvmaxdp
+        assert_eq!(enc_xx3(34, 35, 36, 208), 0xF043_2687); // xvcpsgnsp
+        assert_eq!(enc_xx3(34, 35, 36, 240), 0xF043_2787); // xvcpsgndp
+        assert_eq!(enc_xx3(34, 35, 36, 65), 0xF043_220F); // xvmaddasp
+        assert_eq!(enc_xx3(34, 35, 36, 97), 0xF043_230F); // xvmaddadp
         assert_eq!(enc_vx(2, 3, 4, 1026), 0x1043_2402); // vavgub
         assert_eq!(enc_vx(2, 3, 4, 1090), 0x1043_2442); // vavguh
         assert_eq!(enc_vx(2, 3, 4, 1154), 0x1043_2482); // vavguw

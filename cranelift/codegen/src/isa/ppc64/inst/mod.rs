@@ -2,7 +2,7 @@
 
 use crate::binemit::{Addend, CodeOffset, Reloc};
 pub use crate::ir::condcodes::{FloatCC, IntCC};
-use crate::ir::types::{F32, F64, I8, I16, I32, I64, I128};
+use crate::ir::types::{F32, F64, I8, I8X16, I16, I32, I64, I128};
 pub use crate::ir::{MemFlagsData, Type};
 use crate::isa::FunctionAlignment;
 use crate::machinst::*;
@@ -208,6 +208,13 @@ fn ppc64_get_operands(inst: &mut Inst, collector: &mut impl OperandVisitor) {
             collector.reg_use(rv);
             collector.reg_use(rs);
             collector.reg_def(rd);
+        }
+        Inst::VecFpuFma { rd, ra, rb, rc, .. } => {
+            collector.reg_use(ra);
+            collector.reg_use(rb);
+            collector.reg_use(rc);
+            // `rd` is the accumulator, which VSX both reads and writes.
+            collector.reg_reuse_def(rd, 2);
         }
         Inst::VecAluRRRR { rd, ra, rb, rc, .. } => {
             collector.reg_use(ra);
@@ -593,6 +600,18 @@ impl MachInst for Inst {
             _ if ty.is_vector() && ty.bits() == 128 => {
                 Ok((&[RegClass::Vector], core::slice::from_ref(ty)))
             }
+            // A 64-bit vector occupies big-endian doubleword 0 of a
+            // vector register -- the same bit positions the high lanes
+            // of the corresponding 128-bit type would use -- with the
+            // other doubleword left undefined. See the lowering rules
+            // for why that half is the useful one.
+            //
+            // The *stored* type is the full 128-bit vector so that
+            // spills and reloads move the whole register. Copying only
+            // the meaningful eight bytes would be enough, but the
+            // register is the natural unit here and nothing reads the
+            // undefined half.
+            _ if ty.is_vector() && ty.bits() == 64 => Ok((&[RegClass::Vector], &[I8X16])),
             _ => Err(CodegenError::Unsupported(alloc::format!(
                 "type not yet supported by the ppc64 backend: {ty}"
             ))),
@@ -1153,6 +1172,15 @@ impl Inst {
                     reg(*rn)
                 )
             }
+            Inst::VecFpuFma { rd, ra, rb, ty, .. } => {
+                let suffix = if ty.lane_bits() == 32 { "sp" } else { "dp" };
+                format!(
+                    "xvmadda{suffix} {}, {}, {}",
+                    wreg(*rd),
+                    reg(*ra),
+                    reg(*rb)
+                )
+            }
             Inst::VecFpuRRR { op, rd, ra, rb, ty } => {
                 let mnemonic = match op {
                     VecFpuOp2::Add => "xvadd",
@@ -1164,6 +1192,7 @@ impl Inst {
                     VecFpuOp2::CmpGe => "xvcmpge",
                     VecFpuOp2::Min => "xvmin",
                     VecFpuOp2::Max => "xvmax",
+                    VecFpuOp2::CopySign => "xvcpsgn",
                 };
                 let sfx = if ty.lane_bits() == 32 { "sp" } else { "dp" };
                 format!(

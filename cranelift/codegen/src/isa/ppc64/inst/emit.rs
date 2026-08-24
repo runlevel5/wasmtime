@@ -1916,6 +1916,19 @@ impl MachInstEmit for Inst {
                 }
             }
 
+            &Inst::VecFpuFma { rd, ra, rb, ty, .. } => {
+                // `xvmadda{sp,dp}`: XT = XA * XB + XT. `rc` is not
+                // encoded -- the register allocator has already made
+                // `rd` and `rc` the same register.
+                let xo = if ty.lane_bits() == 32 { 65 } else { 97 };
+                sink.put4(enc_xx3(
+                    vsr_num(rd.to_reg()),
+                    vsr_num(ra),
+                    vsr_num(rb),
+                    xo,
+                ));
+            }
+
             &Inst::VecFpuRRR { op, rd, ra, rb, ty } => {
                 let single = ty.lane_bits() == 32;
                 let xo = match (op, single) {
@@ -1937,6 +1950,8 @@ impl MachInstEmit for Inst {
                     (VecFpuOp2::Min, false) => 232,
                     (VecFpuOp2::Max, true) => 192,
                     (VecFpuOp2::Max, false) => 224,
+                    (VecFpuOp2::CopySign, true) => 208,
+                    (VecFpuOp2::CopySign, false) => 240,
                 };
                 sink.put4(enc_xx3(
                     vsr_num(rd.to_reg()),

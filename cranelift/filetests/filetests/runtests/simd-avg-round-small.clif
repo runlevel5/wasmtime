@@ -4,6 +4,7 @@ target aarch64
 set enable_multi_ret_implicit_sret
 target riscv64 has_v
 target riscv64 has_v has_c has_zcb
+target powerpc64le
 ; x86_64 and s390x do not currently support 64-bit vectors, or
 ; `avg_round` on `i64x2` values.
 ; x86_64 also does not currently support `avg_round.i32x4`.

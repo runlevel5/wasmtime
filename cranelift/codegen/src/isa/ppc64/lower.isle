@@ -1549,13 +1549,13 @@
 
 ;;;; Floating-point lane arithmetic ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(rule 2 (lower (fadd (ty_vec128 ty) x y))
+(rule 2 (lower (fadd (ty_vec_any ty) x y))
   (output_reg (vec_fpu_rrr (VecFpuOp2.Add) (put_in_reg x) (put_in_reg y) ty)))
-(rule 2 (lower (fsub (ty_vec128 ty) x y))
+(rule 2 (lower (fsub (ty_vec_any ty) x y))
   (output_reg (vec_fpu_rrr (VecFpuOp2.Sub) (put_in_reg x) (put_in_reg y) ty)))
-(rule 2 (lower (fmul (ty_vec128 ty) x y))
+(rule 2 (lower (fmul (ty_vec_any ty) x y))
   (output_reg (vec_fpu_rrr (VecFpuOp2.Mul) (put_in_reg x) (put_in_reg y) ty)))
-(rule 2 (lower (fdiv (ty_vec128 ty) x y))
+(rule 2 (lower (fdiv (ty_vec_any ty) x y))
   (output_reg (vec_fpu_rrr (VecFpuOp2.Div) (put_in_reg x) (put_in_reg y) ty)))
 
 (rule 2 (lower (sqrt (ty_vec128 ty) x))
@@ -1578,22 +1578,22 @@
 (rule (vec_fcmp op x y ty)
   (vec_fpu_rrr op (put_in_reg x) (put_in_reg y) ty))
 
-(rule 2 (lower (fcmp _ (FloatCC.Equal) x @ (value_type (ty_vec128 ty)) y))
+(rule 2 (lower (fcmp _ (FloatCC.Equal) x @ (value_type (ty_vec_any ty)) y))
   (output_reg (vec_fcmp (VecFpuOp2.CmpEq) x y ty)))
 
-(rule 2 (lower (fcmp _ (FloatCC.NotEqual) x @ (value_type (ty_vec128 ty)) y))
+(rule 2 (lower (fcmp _ (FloatCC.NotEqual) x @ (value_type (ty_vec_any ty)) y))
   (output_reg (vec_not (vec_fcmp (VecFpuOp2.CmpEq) x y ty) ty)))
 
-(rule 2 (lower (fcmp _ (FloatCC.GreaterThan) x @ (value_type (ty_vec128 ty)) y))
+(rule 2 (lower (fcmp _ (FloatCC.GreaterThan) x @ (value_type (ty_vec_any ty)) y))
   (output_reg (vec_fcmp (VecFpuOp2.CmpGt) x y ty)))
 
-(rule 2 (lower (fcmp _ (FloatCC.GreaterThanOrEqual) x @ (value_type (ty_vec128 ty)) y))
+(rule 2 (lower (fcmp _ (FloatCC.GreaterThanOrEqual) x @ (value_type (ty_vec_any ty)) y))
   (output_reg (vec_fcmp (VecFpuOp2.CmpGe) x y ty)))
 
-(rule 2 (lower (fcmp _ (FloatCC.LessThan) x @ (value_type (ty_vec128 ty)) y))
+(rule 2 (lower (fcmp _ (FloatCC.LessThan) x @ (value_type (ty_vec_any ty)) y))
   (output_reg (vec_fcmp (VecFpuOp2.CmpGt) y x ty)))
 
-(rule 2 (lower (fcmp _ (FloatCC.LessThanOrEqual) x @ (value_type (ty_vec128 ty)) y))
+(rule 2 (lower (fcmp _ (FloatCC.LessThanOrEqual) x @ (value_type (ty_vec_any ty)) y))
   (output_reg (vec_fcmp (VecFpuOp2.CmpGe) y x ty)))
 
 ;; A value is ordered exactly when it equals itself, so a pair is
@@ -1607,10 +1607,10 @@
                (vec_fcmp (VecFpuOp2.CmpEq) y y ty)
                ty))
 
-(rule 2 (lower (fcmp _ (FloatCC.Ordered) x @ (value_type (ty_vec128 ty)) y))
+(rule 2 (lower (fcmp _ (FloatCC.Ordered) x @ (value_type (ty_vec_any ty)) y))
   (output_reg (vec_ford x y ty)))
 
-(rule 2 (lower (fcmp _ (FloatCC.Unordered) x @ (value_type (ty_vec128 ty)) y))
+(rule 2 (lower (fcmp _ (FloatCC.Unordered) x @ (value_type (ty_vec_any ty)) y))
   (output_reg (vec_not (vec_ford x y ty) ty)))
 
 ;; The remaining conditions are the unordered-tolerant counterparts of
@@ -1618,28 +1618,28 @@
 ;; operand is NaN, complementing a strict compare yields exactly
 ;; "unordered or the opposite", which is what CLIF's `Unordered*`
 ;; conditions mean.
-(rule 2 (lower (fcmp _ (FloatCC.UnorderedOrLessThan) x @ (value_type (ty_vec128 ty)) y))
+(rule 2 (lower (fcmp _ (FloatCC.UnorderedOrLessThan) x @ (value_type (ty_vec_any ty)) y))
   (output_reg (vec_not (vec_fcmp (VecFpuOp2.CmpGe) x y ty) ty)))
 
-(rule 2 (lower (fcmp _ (FloatCC.UnorderedOrLessThanOrEqual) x @ (value_type (ty_vec128 ty)) y))
+(rule 2 (lower (fcmp _ (FloatCC.UnorderedOrLessThanOrEqual) x @ (value_type (ty_vec_any ty)) y))
   (output_reg (vec_not (vec_fcmp (VecFpuOp2.CmpGt) x y ty) ty)))
 
-(rule 2 (lower (fcmp _ (FloatCC.UnorderedOrGreaterThan) x @ (value_type (ty_vec128 ty)) y))
+(rule 2 (lower (fcmp _ (FloatCC.UnorderedOrGreaterThan) x @ (value_type (ty_vec_any ty)) y))
   (output_reg (vec_not (vec_fcmp (VecFpuOp2.CmpGe) y x ty) ty)))
 
-(rule 2 (lower (fcmp _ (FloatCC.UnorderedOrGreaterThanOrEqual) x @ (value_type (ty_vec128 ty)) y))
+(rule 2 (lower (fcmp _ (FloatCC.UnorderedOrGreaterThanOrEqual) x @ (value_type (ty_vec_any ty)) y))
   (output_reg (vec_not (vec_fcmp (VecFpuOp2.CmpGt) y x ty) ty)))
 
 ;; Equality that tolerates NaN, and its strict-ordered complement:
 ;; neither operand greater means equal-or-unordered, and either one
 ;; greater means ordered-and-unequal.
-(rule 2 (lower (fcmp _ (FloatCC.UnorderedOrEqual) x @ (value_type (ty_vec128 ty)) y))
+(rule 2 (lower (fcmp _ (FloatCC.UnorderedOrEqual) x @ (value_type (ty_vec_any ty)) y))
   (output_reg (vec_alu_rrr (VecAluOp.Nor)
                            (vec_fcmp (VecFpuOp2.CmpGt) x y ty)
                            (vec_fcmp (VecFpuOp2.CmpGt) y x ty)
                            ty)))
 
-(rule 2 (lower (fcmp _ (FloatCC.OrderedNotEqual) x @ (value_type (ty_vec128 ty)) y))
+(rule 2 (lower (fcmp _ (FloatCC.OrderedNotEqual) x @ (value_type (ty_vec_any ty)) y))
   (output_reg (vec_alu_rrr (VecAluOp.Or)
                            (vec_fcmp (VecFpuOp2.CmpGt) x y ty)
                            (vec_fcmp (VecFpuOp2.CmpGt) y x ty)
@@ -2086,3 +2086,227 @@
 
 (rule 1 (lower (fmax (ty_vec128 ty) x y))
   (output_reg (vec_min_max (VecFpuOp2.Max) x y ty)))
+
+;;;; Vector `fcopysign` and `fma` ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;; `xvcpsgn` takes the sign from its first operand and the magnitude
+;; from its second, which is the order CLIF's `fcopysign x y` wants
+;; reversed: the sign comes from `y`.
+(rule 2 (lower (fcopysign (ty_vec128 ty) x y))
+  (output_reg (vec_fpu_rrr (VecFpuOp2.CopySign) (put_in_reg y) (put_in_reg x) ty)))
+
+;; VSX has only accumulating multiply-adds, so the addend enters as the
+;; destination operand; `VecFpuFma` ties the two together.
+(rule 2 (lower (fma (ty_vec128 ty) x y z))
+  (output_reg (vec_fpu_fma (put_in_reg x) (put_in_reg y) (put_in_reg z) ty)))
+
+;;;; 64-bit vector types ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; `i8x8`, `i16x4`, `i32x2` and `f32x2` live in big-endian doubleword 0
+;; of a vector register -- the bit positions that the *high* lanes of
+;; the corresponding 128-bit type occupy -- with the other doubleword
+;; left undefined. Three consequences, and together they are why that
+;; half was chosen:
+;;
+;;   * `mfvsrd` and `mtvsrd` move exactly that doubleword to and from a
+;;     GPR, and within it lane 0 lands in the least-significant bits.
+;;     So every bitcast between a 64-bit vector and a 64-bit scalar is
+;;     one move, and so is each half of a load or store.
+;;   * A little-endian doubleword load puts memory byte j at big-endian
+;;     byte 7 - j, which is exactly where lane j lives. Memory order and
+;;     lane order therefore agree with no permute at all.
+;;   * Lane-wise instructions do not care *where* in the register the
+;;     lanes sit, only how wide they are, and the type carried on the
+;;     MInst already says that. So every lane-wise rule below is the
+;;     128-bit rule with a wider type guard.
+;;
+;; Only three kinds of operation have to know: anything that reduces
+;; across lanes (it must not see the undefined half), anything that
+;; names a lane, and the widenings.
+
+;; The meaningful doubleword is what an `i64x2` would call lane 1, and
+;; that is already big-endian doubleword 0, so neither direction needs a
+;; permute.
+(decl vec64_to_gpr (Reg) Reg)
+(rule (vec64_to_gpr x) (vec_extract_lane_int x $I64X2 1))
+
+(decl vec64_from_gpr (Reg) Reg)
+(rule (vec64_from_gpr x) (mov_to_vec x))
+
+;;;; Loads, stores and constants
+
+(rule 3 (lower (load (ty_vec64 _) (little_or_native_endian flags) addr offset))
+  (output_reg (vec64_from_gpr (gen_load $I64 (amode addr offset) flags))))
+
+(rule 3 (lower (store (little_or_native_endian flags)
+                      val @ (value_type (ty_vec64 _)) addr offset))
+  (side_effect
+    (gen_store $I64 (amode addr offset) flags (vec64_to_gpr (put_in_reg val)))))
+
+;; The constant's low 64 bits hold every lane, lane 0 least significant,
+;; which is the same layout `mtvsrd` produces.
+(rule 1 (lower (vconst (ty_vec64 _) (u64_from_constant n)))
+  (output_reg (vec64_from_gpr (imm $I64 n))))
+
+;;;; Splats
+;;
+;; Splatting fills all sixteen bytes, so the meaningful half is correct
+;; whichever half that is; these are the 128-bit rules verbatim.
+
+(rule 1 (lower (splat (ty_vec64 ty) x @ (value_type (ty_int _))))
+  (output_reg (vec_splat_lane (mov_to_vec (put_in_reg x)) ty)))
+
+(rule 2 (lower (splat (ty_vec64 _) x @ (value_type $F32)))
+  (output_reg (vec_splat_fpr (fpu_rr (FpuOp1.CvtToSingleBits) (put_in_reg x) $F32)
+                             true)))
+
+;;;; Bitcasts
+
+(rule 7 (lower (bitcast (ty_vec64 _) _ x @ (value_type (ty_vec64 _))))
+  (output_reg (put_in_reg x)))
+
+(rule 6 (lower (bitcast $I64 _ x @ (value_type (ty_vec64 _))))
+  (output_reg (vec64_to_gpr (put_in_reg x))))
+
+(rule 4 (lower (bitcast (ty_vec64 _) _ x @ (value_type $I64)))
+  (output_reg (vec64_from_gpr (put_in_reg x))))
+
+(rule 5 (lower (bitcast $F64 _ x @ (value_type (ty_vec64 _))))
+  (output_reg (mov_to_fpr (vec64_to_gpr (put_in_reg x)) $F64)))
+
+(rule 3 (lower (bitcast (ty_vec64 _) _ x @ (value_type $F64)))
+  (output_reg (vec64_from_gpr (mov_from_fpr (put_in_reg x)))))
+
+;;;; Lane-wise arithmetic, logic and comparison
+
+(rule 5 (lower (iadd (ty_vec64 ty) x y))
+  (output_reg (vec_alu_rrr (VecAluOp.Add) (put_in_reg x) (put_in_reg y) ty)))
+(rule 5 (lower (isub (ty_vec64 ty) x y))
+  (output_reg (vec_alu_rrr (VecAluOp.Sub) (put_in_reg x) (put_in_reg y) ty)))
+(rule 5 (lower (avg_round (ty_vec64 ty) x y))
+  (output_reg (vec_alu_rrr (VecAluOp.AvgRoundU) (put_in_reg x) (put_in_reg y) ty)))
+
+(rule 3 (lower (band (ty_vec64 ty) x y))
+  (output_reg (vec_alu_rrr (VecAluOp.And) (put_in_reg x) (put_in_reg y) ty)))
+(rule 3 (lower (bor (ty_vec64 ty) x y))
+  (output_reg (vec_alu_rrr (VecAluOp.Or) (put_in_reg x) (put_in_reg y) ty)))
+(rule 3 (lower (bxor (ty_vec64 ty) x y))
+  (output_reg (vec_alu_rrr (VecAluOp.Xor) (put_in_reg x) (put_in_reg y) ty)))
+(rule 3 (lower (bnot (ty_vec64 ty) x))
+  (let ((xr Reg (put_in_reg x)))
+    (output_reg (vec_alu_rrr (VecAluOp.Nor) xr xr ty))))
+(rule 3 (lower (fcopysign (ty_vec64 ty) x y))
+  (output_reg (vec_fpu_rrr (VecFpuOp2.CopySign) (put_in_reg y) (put_in_reg x) ty)))
+(rule 3 (lower (fma (ty_vec64 ty) x y z))
+  (output_reg (vec_fpu_fma (put_in_reg x) (put_in_reg y) (put_in_reg z) ty)))
+
+;;;; Reductions
+;;
+;; Both read the meaningful doubleword into a GPR, which is what keeps
+;; the undefined half out of the answer -- cheaper than masking it and
+;; impossible to get subtly wrong.
+
+;; Whatever the lane width, some lane is non-zero exactly when the
+;; doubleword is non-zero.
+(rule 2 (lower (vany_true _ x @ (value_type (ty_vec64 _))))
+  (output_reg
+    (cmp_set (int_compare (IntCC.NotEqual)
+                          (vec64_to_gpr (put_in_reg x))
+                          (imm $I64 0)
+                          $I64))))
+
+;; `vall_true` does depend on the lane width, so compare lanes against
+;; zero first: the mask holds all-ones exactly in the lanes that were
+;; zero, so every lane is non-zero precisely when the meaningful
+;; doubleword of that mask is zero.
+(rule 2 (lower (vall_true _ x @ (value_type (ty_vec64 ty))))
+  (output_reg
+    (cmp_set (int_compare (IntCC.Equal)
+                          (vec64_to_gpr
+                            (vec_alu_rrr (VecAluOp.CmpEq)
+                                         (put_in_reg x) (vec_zero) ty))
+                          (imm $I64 0)
+                          $I64))))
+
+;;;; Pairwise addition
+;;
+;; Same trick as at 128 bits -- a pair of adjacent lanes is one lane of
+;; the next width up, so shifting that wider lane down by one element
+;; width and adding puts the pair's sum in its low half -- with one
+;; difference. There, the two operands' sums could be packed straight
+;; against each other. Here each operand's sums sit in its own
+;; big-endian doubleword 0, and the pack reads whole registers, so the
+;; two doublewords are first gathered into one register: `xxpermdi`
+;; with the second operand's half above the first's, which is the order
+;; that leaves the result's lanes in CLIF's concatenation order.
+(decl iadd_pairwise64_via (Reg Reg Reg Type) Reg)
+(rule (iadd_pairwise64_via xr yr amt wide_ty)
+  (let ((xs Reg (vec_alu_rrr (VecAluOp.Add) xr
+                             (vec_alu_rrr (VecAluOp.ShrU) xr amt wide_ty)
+                             wide_ty))
+        (ys Reg (vec_alu_rrr (VecAluOp.Add) yr
+                             (vec_alu_rrr (VecAluOp.ShrU) yr amt wide_ty)
+                             wide_ty))
+        (gathered Reg (vec_permdi ys xs 0)))
+    (vec_alu_rrr (VecAluOp.PackMod) gathered gathered wide_ty)))
+
+(rule 1 (lower (iadd_pairwise $I8X8 x y))
+  (output_reg (iadd_pairwise64_via (put_in_reg x) (put_in_reg y)
+                                   (vec_splt_imm 8 $I16X8) $I16X8)))
+
+(rule 1 (lower (iadd_pairwise $I16X4 x y))
+  (output_reg (iadd_pairwise64_via (put_in_reg x) (put_in_reg y)
+                                   (vec_splt_imm 16 $I32X4) $I32X4)))
+
+;; A doubleword shift of thirty-two has no splat-immediate encoding, as
+;; at 128 bits, so it comes through a GPR.
+(rule 1 (lower (iadd_pairwise $I32X2 x y))
+  (output_reg (iadd_pairwise64_via (put_in_reg x) (put_in_reg y)
+                                   (vec_splat_lane (mov_to_vec (imm $I64 32)) $I64X2)
+                                   $I64X2)))
+
+;;;; Widening
+;;
+;; The unpack and merge instructions read big-endian elements 0-7 --
+;; which is precisely the doubleword a 64-bit vector occupies -- so the
+;; *High* forms are the ones that see the data, for both signed and
+;; unsigned widening and for both halves. They widen all eight source
+;; lanes across the whole register, leaving CLIF's low four lanes in
+;; big-endian doubleword 1 and its high four in doubleword 0. So
+;; `_high` is already in place and `_low` needs the halves swapped:
+;; the same inversion as at 128 bits, arrived at from the other side.
+
+(rule 1 (lower (swiden_high _ x @ (value_type (ty_vec64 in_ty))))
+  (output_reg (vec_unary (VecUnaryOp.WidenSHigh) (put_in_reg x) in_ty)))
+
+(rule 1 (lower (swiden_low _ x @ (value_type (ty_vec64 in_ty))))
+  (let ((widened Reg (vec_unary (VecUnaryOp.WidenSHigh) (put_in_reg x) in_ty)))
+    (output_reg (vec_permdi widened widened 2))))
+
+(rule 1 (lower (uwiden_high _ x @ (value_type (ty_vec64 in_ty))))
+  (output_reg (vec_alu_rrr (VecAluOp.MergeHigh) (vec_zero) (put_in_reg x) in_ty)))
+
+(rule 1 (lower (uwiden_low _ x @ (value_type (ty_vec64 in_ty))))
+  (let ((widened Reg (vec_alu_rrr (VecAluOp.MergeHigh)
+                                  (vec_zero) (put_in_reg x) in_ty)))
+    (output_reg (vec_permdi widened widened 2))))
+
+;; No doubleword average instruction exists, so use the identity
+;; `avgr_u(a, b) = (a | b) - ((a ^ b) >> 1)`. Its virtue here is that no
+;; intermediate is ever wider than a lane: the carry bit that would
+;; overflow a doubleword add never has to be represented at all. The
+;; shift amount rides in a byte splat, since there is no
+;; splat-immediate at doubleword width -- the doubleword shift reads
+;; only the low six bits of each element, and 0x0101..01 has a one
+;; there.
+(rule 1 (lower (avg_round $I64X2 x y))
+  (let ((xr Reg (put_in_reg x))
+        (yr Reg (put_in_reg y))
+        (one Reg (vec_splt_imm 1 $I8X16)))
+    (output_reg
+      (vec_alu_rrr (VecAluOp.Sub)
+                   (vec_alu_rrr (VecAluOp.Or) xr yr $I64X2)
+                   (vec_alu_rrr (VecAluOp.ShrU)
+                                (vec_alu_rrr (VecAluOp.Xor) xr yr $I64X2)
+                                one $I64X2)
+                   $I64X2))))

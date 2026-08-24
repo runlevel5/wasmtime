@@ -5,6 +5,7 @@ target aarch64
 set enable_multi_ret_implicit_sret
 target riscv64 has_v
 target riscv64 has_v has_c has_zcb
+target powerpc64le
 
 function %fma_f32x2(f32x2, f32x2, f32x2) -> f32x2 {
 block0(v0: f32x2, v1: f32x2, v2: f32x2):
