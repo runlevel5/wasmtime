@@ -73,20 +73,13 @@
 (rule 0 (lower (smulhi (fits_in_16 ty) x y))
   (output_reg
     (gen_shift (ShiftOp.Srad)
-               (ppc_mulld (put_in_ext_reg x ty true) (put_in_ext_reg y ty true))
+               (ppc_mulld (ext_to_64 x ty true) (ext_to_64 y ty true))
                (imm $I64 (ty_bits_u64 ty)))))
 (rule 0 (lower (umulhi (fits_in_16 ty) x y))
   (output_reg
     (gen_shift (ShiftOp.Srd)
-               (ppc_mulld (put_in_ext_reg x ty false) (put_in_ext_reg y ty false))
+               (ppc_mulld (ext_to_64 x ty false) (ext_to_64 y ty false))
                (imm $I64 (ty_bits_u64 ty)))))
-
-;; Extend a value to a full 64-bit register unless it already fills the
-;; low word, which the word-wide instructions read in full.
-(decl put_in_ext_reg (Value Type bool) Reg)
-(rule 1 (put_in_ext_reg val $I32 _) (put_in_reg val))
-(rule 0 (put_in_ext_reg val (fits_in_16 ty) signed)
-  (gen_extend (put_in_reg val) signed (ty_bits ty) 64))
 
 ;;;; Rules for `bmask` ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -2428,3 +2421,180 @@
                                     (vec_splt_imm -1 $I8X16) eight $I16X8))
         (even_lo Reg (vec_alu_rrr (VecAluOp.And) even byte_mask $I16X8)))
     (output_reg (vec_alu_rrr (VecAluOp.Or) odd_hi even_lo $I8X16))))
+
+;;;; Overflow-detecting arithmetic ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; These return the wrapped result together with a boolean. PPC keeps
+;; carry and overflow bits in XER, but reading them back costs about
+;; what recomputing the condition costs, and the recomputation reuses
+;; the existing compare-into-a-GPR machinery -- so only the 128-bit
+;; carry chain, which has no cheap alternative, actually reads XER.
+;;
+;; For a type narrower than a doubleword the work is done at full width
+;; on extended operands. The exact result of any such add, subtract or
+;; multiply fits in a doubleword, so "overflowed" is just "the result
+;; does not fit back into the type", which is one compare.
+
+;; Extend an operand to fill the whole register. This has to be an
+;; unconditional extension, including from `i32`: the checks below
+;; compare entire doublewords, so the bits above the type must be
+;; correct rather than merely ignored. (Rules that feed only word-wide
+;; instructions can and do skip it, since those read the low word in
+;; full -- but reusing such an operand here reads that register's
+;; undefined upper half and reports overflow at random.)
+(decl ext_to_64 (Value Type bool) Reg)
+(rule (ext_to_64 val ty signed)
+  (gen_extend (put_in_reg val) signed (ty_bits ty) 64))
+
+(decl overflowed_narrow (Reg Type bool) Reg)
+;; Signed: the value is out of range exactly when re-extending its low
+;; bits changes it.
+(rule (overflowed_narrow v ty true)
+  (cmp_set (int_compare (IntCC.NotEqual) v
+                        (gen_extend v true (ty_bits ty) 64) $I64)))
+;; Unsigned: out of range exactly when a bit at or above the type's
+;; width survives.
+(rule (overflowed_narrow v ty false)
+  (cmp_set (int_compare (IntCC.NotEqual)
+                        (gen_shift (ShiftOp.Srd) v (imm $I64 (ty_bits_u64 ty)))
+                        (imm $I64 0) $I64)))
+
+(rule 0 (lower (uadd_overflow (fits_in_32 ty) x y))
+  (let ((sum Reg (ppc_add (ext_to_64 x ty false) (ext_to_64 y ty false))))
+    (output_pair (value_reg sum) (value_reg (overflowed_narrow sum ty false)))))
+
+(rule 0 (lower (sadd_overflow (fits_in_32 ty) x y))
+  (let ((sum Reg (ppc_add (ext_to_64 x ty true) (ext_to_64 y ty true))))
+    (output_pair (value_reg sum) (value_reg (overflowed_narrow sum ty true)))))
+
+(rule 0 (lower (ssub_overflow (fits_in_32 ty) x y))
+  (let ((diff Reg (ppc_sub (ext_to_64 x ty true) (ext_to_64 y ty true))))
+    (output_pair (value_reg diff) (value_reg (overflowed_narrow diff ty true)))))
+
+(rule 0 (lower (umul_overflow (fits_in_32 ty) x y))
+  (let ((prod Reg (ppc_mulld (ext_to_64 x ty false) (ext_to_64 y ty false))))
+    (output_pair (value_reg prod) (value_reg (overflowed_narrow prod ty false)))))
+
+(rule 0 (lower (smul_overflow (fits_in_32 ty) x y))
+  (let ((prod Reg (ppc_mulld (ext_to_64 x ty true) (ext_to_64 y ty true))))
+    (output_pair (value_reg prod) (value_reg (overflowed_narrow prod ty true)))))
+
+;; An unsigned subtract borrows exactly when the minuend is smaller, so
+;; this one needs no range check at any width.
+(rule 0 (lower (usub_overflow (fits_in_32 ty) x y))
+  (let ((xe Reg (ext_to_64 x ty false))
+        (ye Reg (ext_to_64 y ty false)))
+    (output_pair (value_reg (ppc_sub xe ye))
+                 (value_reg (cmp_set (int_compare (IntCC.UnsignedLessThan)
+                                                  xe ye $I64))))))
+
+;;;; The doubleword cases, where the exact result no longer fits.
+
+;; Wrapping past the top of the range makes an unsigned sum smaller
+;; than either input.
+(rule 1 (lower (uadd_overflow $I64 x y))
+  (let ((xr Reg (put_in_reg x))
+        (sum Reg (ppc_add xr (put_in_reg y))))
+    (output_pair (value_reg sum)
+                 (value_reg (cmp_set (int_compare (IntCC.UnsignedLessThan)
+                                                  sum xr $I64))))))
+
+(rule 1 (lower (usub_overflow $I64 x y))
+  (let ((xr Reg (put_in_reg x))
+        (yr Reg (put_in_reg y)))
+    (output_pair (value_reg (ppc_sub xr yr))
+                 (value_reg (cmp_set (int_compare (IntCC.UnsignedLessThan)
+                                                  xr yr $I64))))))
+
+;; A signed add overflows when both inputs differ in sign from the
+;; result, which is what the two exclusive-ors and the sign test say.
+(decl signed_add_ovf (Reg Reg Reg) Reg)
+(rule (signed_add_ovf a b sum)
+  (cmp_set (int_compare (IntCC.SignedLessThan)
+                        (ppc_and (ppc_xor a sum) (ppc_xor b sum))
+                        (imm $I64 0) $I64)))
+
+;; For a subtract it is the inputs differing in sign from each other
+;; and the result differing from the minuend.
+(decl signed_sub_ovf (Reg Reg Reg) Reg)
+(rule (signed_sub_ovf a b diff)
+  (cmp_set (int_compare (IntCC.SignedLessThan)
+                        (ppc_and (ppc_xor a b) (ppc_xor a diff))
+                        (imm $I64 0) $I64)))
+
+(rule 1 (lower (sadd_overflow $I64 x y))
+  (let ((xr Reg (put_in_reg x))
+        (yr Reg (put_in_reg y))
+        (sum Reg (ppc_add xr yr)))
+    (output_pair (value_reg sum) (value_reg (signed_add_ovf xr yr sum)))))
+
+(rule 1 (lower (ssub_overflow $I64 x y))
+  (let ((xr Reg (put_in_reg x))
+        (yr Reg (put_in_reg y))
+        (diff Reg (ppc_sub xr yr)))
+    (output_pair (value_reg diff) (value_reg (signed_sub_ovf xr yr diff)))))
+
+;; The high half of the product is the overflow: zero for an unsigned
+;; product that fits, and the low half's sign-fill for a signed one.
+(rule 1 (lower (umul_overflow $I64 x y))
+  (let ((xr Reg (put_in_reg x))
+        (yr Reg (put_in_reg y)))
+    (output_pair (value_reg (ppc_mulld xr yr))
+                 (value_reg (cmp_set (int_compare (IntCC.NotEqual)
+                                                  (ppc_mulhdu xr yr)
+                                                  (imm $I64 0) $I64))))))
+
+(rule 1 (lower (smul_overflow $I64 x y))
+  (let ((xr Reg (put_in_reg x))
+        (yr Reg (put_in_reg y))
+        (prod Reg (ppc_mulld xr yr)))
+    (output_pair (value_reg prod)
+                 (value_reg (cmp_set (int_compare (IntCC.NotEqual)
+                                                  (ppc_mulhd xr yr)
+                                                  (gen_shift (ShiftOp.Srad) prod (imm $I64 63))
+                                                  $I64))))))
+
+;;;; The 128-bit cases.
+;;
+;; The signed ones reuse the sign tests above on the high halves alone,
+;; which is where a 128-bit result's sign lives. The unsigned ones need
+;; the carry out of the top of the chain, and that is the one place
+;; XER.CA is read: `addze` of zero yields it directly. The zero is
+;; materialized before the chain starts so that nothing lands between
+;; the `adde` and the `addze`.
+
+(rule 2 (lower (uadd_overflow $I128 x y))
+  (let ((xs ValueRegs (put_in_regs x))
+        (ys ValueRegs (put_in_regs y))
+        (zero Reg (imm $I64 0))
+        (lo Reg (ppc_addc (lo xs) (lo ys)))
+        (hi Reg (ppc_adde (hi xs) (hi ys))))
+    (output_pair (value_regs lo hi) (value_reg (ppc_addze zero)))))
+
+;; A subtract's carry out is the *complement* of a borrow -- the
+;; hardware computes `x + ~y + 1` -- so the flag is inverted.
+(rule 2 (lower (usub_overflow $I128 x y))
+  (let ((xs ValueRegs (put_in_regs x))
+        (ys ValueRegs (put_in_regs y))
+        (zero Reg (imm $I64 0))
+        (one Reg (imm $I64 1))
+        (lo Reg (ppc_subfc (lo xs) (lo ys)))
+        (hi Reg (ppc_subfe (hi xs) (hi ys))))
+    (output_pair (value_regs lo hi)
+                 (value_reg (ppc_xor (ppc_addze zero) one)))))
+
+(rule 2 (lower (sadd_overflow $I128 x y))
+  (let ((xs ValueRegs (put_in_regs x))
+        (ys ValueRegs (put_in_regs y))
+        (lo Reg (ppc_addc (lo xs) (lo ys)))
+        (hi Reg (ppc_adde (hi xs) (hi ys))))
+    (output_pair (value_regs lo hi)
+                 (value_reg (signed_add_ovf (hi xs) (hi ys) hi)))))
+
+(rule 2 (lower (ssub_overflow $I128 x y))
+  (let ((xs ValueRegs (put_in_regs x))
+        (ys ValueRegs (put_in_regs y))
+        (lo Reg (ppc_subfc (lo xs) (lo ys)))
+        (hi Reg (ppc_subfe (hi xs) (hi ys))))
+    (output_pair (value_regs lo hi)
+                 (value_reg (signed_sub_ovf (hi xs) (hi ys) hi)))))

@@ -79,6 +79,11 @@
   (enum
     (Neg)
     (Not)
+    ;; `addze`: the operand plus XER.CA. The only place this backend
+    ;; reads the carry bit, used to get the carry out of a 128-bit
+    ;; add or subtract; see the note on `Addc` for why nothing can
+    ;; come between the producer and this.
+    (AddZE)
 ))
 
 ;; Bit-counting operations, expanded at emit time: the POWER9 (ISA 3.0)
@@ -1003,6 +1008,9 @@
 
 (decl shift_mask_u16 (Type) u16)
 (extern constructor shift_mask_u16 shift_mask_u16)
+
+(decl ppc_addze (Reg) Reg)
+(rule (ppc_addze x) (gen_unary (UnaryOp.AddZE) x))
 
 (decl gen_unary (UnaryOp Reg) Reg)
 (rule (gen_unary op rn)

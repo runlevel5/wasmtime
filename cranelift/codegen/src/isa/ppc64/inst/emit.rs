@@ -608,6 +608,7 @@ impl MachInstEmit for Inst {
                     UnaryOp::Neg => enc_xo(rd, rn, 0, 104),
                     // `nor rd, rn, rn` is the canonical `not`.
                     UnaryOp::Not => enc_x_logic(rn, rd, rn, 124),
+                    UnaryOp::AddZE => enc_xo(rd, rn, 0, 202),
                 };
                 sink.put4(word);
             }

@@ -685,6 +685,7 @@ impl Inst {
                 let mnemonic = match op {
                     UnaryOp::Neg => "neg",
                     UnaryOp::Not => "not",
+                    UnaryOp::AddZE => "addze",
                 };
                 format!("{mnemonic} {}, {}", wreg(*rd), reg(*rn))
             }
