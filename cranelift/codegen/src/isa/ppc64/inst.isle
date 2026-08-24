@@ -212,6 +212,11 @@
     (MergeEvenWord)
     ;; Rotate each doubleword left by the per-lane amount (`vrld`).
     (RotlDword)
+    ;; `vbpermq`: gather sixteen arbitrary bits of the first operand,
+    ;; selected by big-endian bit indices in the bytes of the second,
+    ;; into the low halfword. Lane-width-independent -- the indices say
+    ;; everything -- so the lowering rules pass any type.
+    (BitPermQ)
 
 ))
 
@@ -1363,6 +1368,18 @@
 (extern constructor amode amode)
 
 ;; The same address eight bytes on, for the high half of an `i128`.
+;; The `vbpermq` index vector that gathers each lane's sign bit, for a
+;; vector of the given lane type.
+(decl vhigh_bits_ctrl (Type) u128)
+(extern constructor vhigh_bits_ctrl vhigh_bits_ctrl)
+
+(decl ty_smin_u64 (Type) u64)
+(extern constructor ty_smin_u64 ty_smin_u64)
+(decl ty_smax_u64 (Type) u64)
+(extern constructor ty_smax_u64 ty_smax_u64)
+(decl ty_umax_u64 (Type) u64)
+(extern constructor ty_umax_u64 ty_umax_u64)
+
 (decl ty_vec_any (Type) Type)
 (extern extractor ty_vec_any ty_vec_any)
 

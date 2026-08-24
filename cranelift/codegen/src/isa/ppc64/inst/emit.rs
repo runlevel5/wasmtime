@@ -233,6 +233,8 @@ fn vx_xo(op: VecAluOp, ty: Type) -> u32 {
         VecAluOp::PackMod => [0, 14, 78, 1102],
         VecAluOp::MergeEvenWord => [0, 0, 1932, 0],
         VecAluOp::RotlDword => [0, 0, 0, 196],
+        // Lane-width-independent: the index vector says which bits.
+        VecAluOp::BitPermQ => [1356, 1356, 1356, 1356],
         VecAluOp::And
         | VecAluOp::Or
         | VecAluOp::Xor

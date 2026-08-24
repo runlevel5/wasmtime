@@ -236,6 +236,45 @@ impl generated_code::Context for Ppc64IsleContext<'_, '_, MInst, Ppc64Backend> {
         ty.lane_bits() > 8
     }
 
+    /// Build the `vbpermq` index vector that gathers every lane's sign
+    /// bit into the low halfword, least-significant bit for lane 0.
+    ///
+    /// `vbpermq` sends the bit selected by its index byte `i` to result
+    /// bit weight `2^(15 - i)`, so lane `j` must be selected by index
+    /// byte `15 - j`. A lane's sign bit is the most significant of its
+    /// element, and little-endian lane `j` is big-endian element
+    /// `n - 1 - j`, which puts that bit at big-endian bit
+    /// `w * (n - 1 - j)`. Index bytes with no lane to name are set
+    /// above 127, which `vbpermq` gathers as zero.
+    fn vhigh_bits_ctrl(&mut self, ty: Type) -> u128 {
+        let w = u128::from(ty.lane_bits());
+        let n = u128::from(ty.lane_count());
+        let mut ctrl = 0u128;
+        for k in 0..16u128 {
+            // Little-endian byte `k` of the vector is big-endian byte
+            // `15 - k`, which is the index for lane `k`.
+            let byte = if k < n { w * (n - 1 - k) } else { 0xff };
+            ctrl |= byte << (8 * k);
+        }
+        ctrl
+    }
+
+    /// The most negative value of a signed integer type, and the most
+    /// positive of a signed and of an unsigned one, as the bit patterns
+    /// a 64-bit register would hold. Used to clamp a conversion whose
+    /// instruction saturates only to a word.
+    fn ty_smin_u64(&mut self, ty: Type) -> u64 {
+        (-1i64 << (ty.bits() - 1)) as u64
+    }
+
+    fn ty_smax_u64(&mut self, ty: Type) -> u64 {
+        (1u64 << (ty.bits() - 1)) - 1
+    }
+
+    fn ty_umax_u64(&mut self, ty: Type) -> u64 {
+        (1u64 << ty.bits()) - 1
+    }
+
     /// Matches any vector type that fits in one register: 128-bit, or
     /// the 64-bit types held in big-endian doubleword 0. For rules
     /// whose instruction is position-independent and depends only on

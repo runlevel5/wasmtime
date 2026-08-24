@@ -429,6 +429,7 @@ mod tests {
         assert_eq!(enc_va(2, 3, 4, 5, 43), 0x1043_216B); // vperm
         assert_eq!(enc_vx(2, 3, 4, 136), 0x1043_2088); // vmulouw
         assert_eq!(enc_vx(2, 3, 4, 196), 0x1043_20C4); // vrld
+        assert_eq!(enc_vx(2, 3, 4, 1356), 0x1043_254C); // vbpermq
         assert_eq!(enc_vx(2, 3, 4, 1476), 0x1043_25C4); // vsld (already used)
         assert_eq!(enc_xx2(34, 35, 152), 0xF040_1A63); // xvcvspsxws
         assert_eq!(enc_xx2(34, 35, 136), 0xF040_1A23); // xvcvspuxws
@@ -446,6 +447,7 @@ mod tests {
         assert_eq!(enc_m(4, 3, 25, 7, 31), 0x5483_C9FE); // srwi r3, r4, 7
         assert_eq!(enc_m(4, 3, 7, 0, 31), 0x5483_383E); // rotlwi r3, r4, 7
         assert_eq!(enc_x_logic(4, 3, 7, 824), 0x7C83_3E70); // srawi r3, r4, 7
+        assert_eq!(enc_xo(3, 4, 0, 202), 0x7C64_0194); // addze r3, r4
         assert_eq!(enc_xo(3, 4, 5, 266), 0x7C64_2A14); // add r3, r4, r5
         assert_eq!(enc_xo(3, 4, 5, 40), 0x7C64_2850); // subf r3, r4, r5
         assert_eq!(enc_xo(3, 4, 5, 10), 0x7C64_2814); // addc r3, r4, r5

@@ -2598,3 +2598,71 @@
         (hi Reg (ppc_subfe (hi xs) (hi ys))))
     (output_pair (value_regs lo hi)
                  (value_reg (signed_sub_ovf (hi xs) (hi ys) hi)))))
+
+;;;; Sub-word float-to-integer conversions ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; The trapping forms need nothing new: the range checks are built from
+;; the destination type's own bounds, so once they pass, the word-wide
+;; conversion instruction's result is in range and its low bits are the
+;; answer.
+
+(rule 1 (lower (fcvt_to_sint (fits_in_16 out_ty) x @ (value_type (ty_scalar_float in_ty))))
+  (output_reg (fpu_to_int (put_in_reg x) true false in_ty out_ty)))
+
+(rule 1 (lower (fcvt_to_uint (fits_in_16 out_ty) x @ (value_type (ty_scalar_float in_ty))))
+  (output_reg (fpu_to_int (put_in_reg x) false false in_ty out_ty)))
+
+;; The saturating forms do need work, because the instruction saturates
+;; to a *word*: an input of 1000 converted for an `i8` comes back as
+;; 1000, where CLIF wants 127. So the word conversion is clamped
+;; afterwards. Its upper bits are undefined, so it is extended first --
+;; the comparisons that follow are 64-bit.
+
+(rule 1 (lower (fcvt_to_sint_sat (fits_in_16 out_ty)
+                                 x @ (value_type (ty_scalar_float in_ty))))
+  (let ((wide Reg (gen_extend (fpu_to_int (put_in_reg x) true true in_ty $I32)
+                              true 32 64))
+        (lo Reg (imm $I64 (ty_smin_u64 out_ty)))
+        (hi Reg (imm $I64 (ty_smax_u64 out_ty))))
+    (output_reg
+      (gen_select (int_compare (IntCC.SignedLessThan) wide lo $I64)
+                  lo
+                  (gen_select (int_compare (IntCC.SignedGreaterThan) wide hi $I64)
+                              hi wide)))))
+
+;; The unsigned conversion cannot go below zero, so only the upper
+;; bound needs clamping.
+(rule 1 (lower (fcvt_to_uint_sat (fits_in_16 out_ty)
+                                 x @ (value_type (ty_scalar_float in_ty))))
+  (let ((wide Reg (gen_extend (fpu_to_int (put_in_reg x) false true in_ty $I32)
+                              false 32 64))
+        (hi Reg (imm $I64 (ty_umax_u64 out_ty))))
+    (output_reg
+      (gen_select (int_compare (IntCC.UnsignedGreaterThan) wide hi $I64) hi wide))))
+
+;;;; Multiply on 64-bit vectors ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; The halfword and word multiplies are per-lane and so position-blind;
+;; bytes reuse the interleave the 128-bit rule needs.
+
+(rule 6 (lower (imul $I16X4 x y))
+  (output_reg (vec_alu_rrrr (VecAluOp4.MulAddUH)
+                            (put_in_reg x) (put_in_reg y) (vec_zero))))
+
+(rule 6 (lower (imul $I32X2 x y))
+  (output_reg (vec_alu_rrr (VecAluOp.MulWord) (put_in_reg x) (put_in_reg y) $I32X4)))
+
+;;;; `vhigh_bits` ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; Collect one bit per lane -- its sign -- into a scalar. `vbpermq`
+;; gathers sixteen arbitrary bits named by an index vector, which is
+;; exactly this once the indices are worked out; see `vhigh_bits_ctrl`.
+;; The gathered bits land in the low halfword of big-endian doubleword
+;; 0, which is what a move to a general register reads.
+
+(rule (lower (vhigh_bits _ x @ (value_type (ty_vec128 ty))))
+  (output_reg
+    (vec64_to_gpr (vec_alu_rrr (VecAluOp.BitPermQ)
+                               (put_in_reg x)
+                               (vec_const (vhigh_bits_ctrl ty))
+                               ty))))
