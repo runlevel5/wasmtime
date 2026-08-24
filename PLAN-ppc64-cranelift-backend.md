@@ -1085,6 +1085,46 @@ Validated on the POWER9: batch runtests plus `simd-shuffle` and
 `simd-swizzle` pass natively, the full filetest suite is green, and both
 new encodings match `llvm-mc` byte-for-byte.
 
+#### Batch 14 (2026-08-24): vector min/max — probe first, and it paid
+
+Following the batch-11 lesson, `xvmin`/`xvmax` were **probed on the
+POWER9 before any lowering was written** (a small C program with inline
+asm over the interesting bit patterns). Result: they are right about
+more than expected and wrong about exactly one thing.
+
+Right: -0 ranks below +0, **and independently of operand order** —
+stronger than IEEE minNum requires, so no operand-order fixup is
+needed. Infinities correct. A *signalling* NaN is quieted and returned,
+which is already an acceptable answer.
+
+Wrong: a *quiet* NaN makes them return the **numeric** operand, where
+CLIF wants a NaN. Same as the scalar `xsmindp`/`xsmaxdp`, so the fixup
+took the same shape.
+
+Two decisions inside the fixup, both load-bearing:
+
+1. **The NaN is the sum of the operands, not a materialized constant.**
+   The wasm min/max tests demand `nan:canonical` in 72 of their cases
+   per op (checked in `tests/spec_testsuite/simd_f64x2.wast` rather
+   than assumed), and only propagation gives a canonical NaN out for a
+   canonical NaN in. A synthesized quiet NaN would have been *cheaper*
+   — the all-ones unordered mask is itself a valid quiet NaN, which
+   would have made the whole thing five instructions via `xxlorc` —
+   and would have failed those 72 assertions. Worth recording as a case
+   where the cheaper sequence is wrong for a reason no runtest of my
+   own devising would have caught.
+2. **The select is driven by the operands, not by the sum.** Testing
+   whether the sum is a NaN looks equivalent and is not: `inf + -inf`
+   is a NaN while the minimum of those operands is perfectly ordered.
+   Comparing each operand with itself is false exactly where it is
+   unordered; the two masks are ANDed so either NaN poisons the lane.
+
+Six instructions, verified in the disassembly. The runtests place NaNs
+in both operand positions (the hardware's wrong answer is asymmetric
+that way) and compare raw bits through a bitcast, so the payload is
+actually checked rather than merely NaN-ness. Enables four upstream
+vector min/max tests.
+
 ### Phase 6 — Tuning
 
 POWER9/10 fast paths (`isel`, `setb`, mod instructions, P10 pcrel to kill
