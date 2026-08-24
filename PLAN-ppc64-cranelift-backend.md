@@ -1007,6 +1007,40 @@ regression tests (extract-lane canonicalisation, extmul aliased dest,
 high-lane corruption on P8 vs P9) are exactly the corner cases to encode as
 runtests. Keep gated off until scalar is solid.
 
+#### Batches 11-12 (2026-08-24): float/integer lane conversions
+
+**NaN behaviour probed on hardware, not read from the manual** — and it
+is asymmetric. `xvcvspuxws`/`xvcvdpuxds` already give zero for a NaN
+lane, exactly what CLIF's saturating conversions specify, so the
+unsigned rules are a bare instruction. The signed forms give the *most
+negative* value instead, so those mask the result against the source
+compared with itself (all ones for an ordered lane, all zeros for NaN).
+Reading the saturation description and assuming symmetry would have
+produced a wrong signed lowering that passes every non-NaN test.
+
+**Both precision changes need lane gathers**, and the derivations are
+the mirror of each other under the standing identity that LE lane i is
+BE element (count - 1 - i):
+
+- `xvcvdpsp` writes BE doubleword 0's result to BE word 0 and
+  doubleword 1's to word 2 — in LE terms, lanes 0 and 1 land in word
+  lanes 1 and 3, each in the *high* word of its doubleword. Rotate each
+  doubleword by 32 to bring them down, then pack the low words against
+  zero: results in lanes 0 and 1, upper two zeroed, as `fvdemote`
+  requires.
+- `xvcvspdp` reads from BE words 0 and 2 — the same high words. So the
+  lanes to promote must be moved there first, and merging the source
+  against zero does precisely that, leaving source lanes 0 and 1 at
+  word lanes 1 and 3.
+
+The batch-12 runtest uses distinct asymmetric values in every lane
+specifically so a gather that picked the wrong word shows up; symmetric
+test data would hide it.
+
+Validated on the POWER9: 8 runtests pass against the interpreter, the
+full filetest suite is green, and all seven encodings match `llvm-mc`
+byte-for-byte. Enables six upstream conversion tests.
+
 ### Phase 6 — Tuning
 
 POWER9/10 fast paths (`isel`, `setb`, mod instructions, P10 pcrel to kill
