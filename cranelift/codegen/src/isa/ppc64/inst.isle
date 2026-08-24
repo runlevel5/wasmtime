@@ -279,6 +279,15 @@
     (CmpEq)
     (CmpGt)
     (CmpGe)
+    ;; Lane minimum and maximum. Probed on a POWER9: these give the
+    ;; signed-zero behaviour CLIF wants, and give it independently of
+    ;; operand order -- stronger than IEEE minNum requires -- and they
+    ;; handle infinities correctly. On a *quiet* NaN, though, they
+    ;; return the numeric operand, where CLIF requires a NaN, so the
+    ;; lowering rules add a fixup. (A signalling NaN they do quiet and
+    ;; return, but the fixup covers that case too.)
+    (Min)
+    (Max)
 ))
 
 (type VecFpuOp1

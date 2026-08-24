@@ -2049,3 +2049,40 @@
         (oob Reg (vec_alu_rrr (VecAluOp.CmpGtU) i fifteen $I8X16))
         (picked Reg (vec_alu_rrrr (VecAluOp4.Perm) s s ctrl)))
     (output_reg (vec_alu_rrr (VecAluOp.AndC) picked oob $I8X16))))
+
+;;;; Vector `fmin` / `fmax` ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; `xvmin`/`xvmax` are right about everything CLIF cares about except
+;; quiet NaNs: probed on a POWER9, they treat -0 as below +0 and do so
+;; independently of operand order (stronger than IEEE minNum requires),
+;; and they handle infinities correctly -- but given a quiet NaN they
+;; return the *numeric* operand, where CLIF requires a NaN. The scalar
+;; forms behave the same way, hence the same shape of fixup here.
+;;
+;; The NaN is taken from the *sum* of the operands rather than
+;; synthesized, because the sum propagates an input NaN's payload: a
+;; canonical NaN in gives a canonical NaN out, which is what wasm's
+;; min/max tests require of these lanes. Materializing an arbitrary
+;; quiet NaN would be one instruction cheaper and would fail them.
+;;
+;; The select cannot be driven by asking whether the sum is a NaN,
+;; because `inf + -inf` is one while the minimum of those operands is
+;; perfectly ordered. So it is driven by the operands: comparing each
+;; with itself is false exactly where that operand is unordered, and
+;; the two results are combined so that either NaN poisons the lane.
+(decl vec_min_max (VecFpuOp2 Value Value Type) Reg)
+(rule (vec_min_max op x y ty)
+  (let ((a Reg (put_in_reg x))
+        (b Reg (put_in_reg y))
+        (picked Reg (vec_fpu_rrr op a b ty))
+        (propagated Reg (vec_fpu_rrr (VecFpuOp2.Add) a b ty))
+        (a_ordered Reg (vec_fpu_rrr (VecFpuOp2.CmpEq) a a ty))
+        (b_ordered Reg (vec_fpu_rrr (VecFpuOp2.CmpEq) b b ty))
+        (ordered Reg (vec_alu_rrr (VecAluOp.And) a_ordered b_ordered ty)))
+    (vec_sel picked propagated ordered)))
+
+(rule 1 (lower (fmin (ty_vec128 ty) x y))
+  (output_reg (vec_min_max (VecFpuOp2.Min) x y ty)))
+
+(rule 1 (lower (fmax (ty_vec128 ty) x y))
+  (output_reg (vec_min_max (VecFpuOp2.Max) x y ty)))

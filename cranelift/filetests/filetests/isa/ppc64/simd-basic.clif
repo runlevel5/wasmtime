@@ -687,3 +687,49 @@ block0(v0: i8x16, v1: i8x16):
 ;   addi r1, r1, 0x10
 ;   blr
 
+
+function %fmin_f64x2(f64x2, f64x2) -> f64x2 {
+block0(v0: f64x2, v1: f64x2):
+    v2 = fmin v0, v1
+    return v2
+}
+
+; VCode:
+;   mflr r0
+;   load_addr sp, -16(sp)
+;   std r0, 8(sp)
+;   std fp, 0(sp)
+;   mr fp, sp
+; block0:
+;   xvmindp v4, v2, v3
+;   xvadddp v5, v2, v3
+;   xvcmpeqdp v7, v2, v2
+;   xvcmpeqdp v9, v3, v3
+;   xxland v11, v7, v9
+;   xxsel v2, v5, v4, v11
+;   ld r0, 8(sp)
+;   mtlr r0
+;   ld fp, 0(sp)
+;   load_addr sp, 16(sp)
+;   blr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   mflr r0
+;   addi r1, r1, -0x10
+;   std r0, 8(r1)
+;   std r31, 0(r1)
+;   ori r31, r1, 0
+; block1: ; offset 0x14
+;   xvmindp v4, v2, v3
+;   xvadddp v5, v2, v3
+;   xvcmpeqdp v7, v2, v2
+;   xvcmpeqdp v9, v3, v3
+;   xxland v11, v7, v9
+;   xxsel v2, v5, v4, v11
+;   ld r0, 8(r1)
+;   mtlr r0
+;   ld r31, 0(r1)
+;   addi r1, r1, 0x10
+;   blr
+

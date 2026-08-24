@@ -1162,6 +1162,8 @@ impl Inst {
                     VecFpuOp2::CmpEq => "xvcmpeq",
                     VecFpuOp2::CmpGt => "xvcmpgt",
                     VecFpuOp2::CmpGe => "xvcmpge",
+                    VecFpuOp2::Min => "xvmin",
+                    VecFpuOp2::Max => "xvmax",
                 };
                 let sfx = if ty.lane_bits() == 32 { "sp" } else { "dp" };
                 format!(

@@ -1933,6 +1933,10 @@ impl MachInstEmit for Inst {
                     (VecFpuOp2::CmpGt, false) => 107,
                     (VecFpuOp2::CmpGe, true) => 83,
                     (VecFpuOp2::CmpGe, false) => 115,
+                    (VecFpuOp2::Min, true) => 200,
+                    (VecFpuOp2::Min, false) => 232,
+                    (VecFpuOp2::Max, true) => 192,
+                    (VecFpuOp2::Max, false) => 224,
                 };
                 sink.put4(enc_xx3(
                     vsr_num(rd.to_reg()),
