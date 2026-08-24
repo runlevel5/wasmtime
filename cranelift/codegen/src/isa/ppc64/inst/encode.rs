@@ -420,6 +420,13 @@ mod tests {
         assert_eq!(enc_vx(2, 3, 4, 136), 0x1043_2088); // vmulouw
         assert_eq!(enc_vx(2, 3, 4, 196), 0x1043_20C4); // vrld
         assert_eq!(enc_vx(2, 3, 4, 1476), 0x1043_25C4); // vsld (already used)
+        assert_eq!(enc_xx2(34, 35, 152), 0xF040_1A63); // xvcvspsxws
+        assert_eq!(enc_xx2(34, 35, 136), 0xF040_1A23); // xvcvspuxws
+        assert_eq!(enc_xx2(34, 35, 184), 0xF040_1AE3); // xvcvsxwsp
+        assert_eq!(enc_xx2(34, 35, 472), 0xF040_1F63); // xvcvdpsxds
+        assert_eq!(enc_xx2(34, 35, 504), 0xF040_1FE3); // xvcvsxddp
+        assert_eq!(enc_xx2(34, 35, 393), 0xF040_1E27); // xvcvdpsp
+        assert_eq!(enc_xx2(34, 35, 457), 0xF040_1F27); // xvcvspdp
         // Shift-by-immediate forms, all verified against llvm-mc.
         assert_eq!(enc_md(4, 3, 7, 56, 1), 0x7883_3E24); // sldi r3, r4, 7
         assert_eq!(enc_md(4, 3, 57, 7, 0), 0x7883_C9C2); // srdi r3, r4, 7

@@ -226,6 +226,30 @@
 ))
 
 ;; Single-operand lane operations in VX form (RA field zero).
+;; Lane-wise conversions between floating point and integers. The
+;; float-to-integer forms truncate toward zero and saturate to the
+;; representable range, which is what CLIF's saturating conversions
+;; ask for -- but only the *unsigned* ones already give zero for a NaN
+;; lane. Probed on a POWER9: the signed forms produce the most negative
+;; value for NaN, so those rules mask the NaN lanes afterwards.
+(type VecCvtOp
+  (enum
+    (F32ToI32S)
+    (F32ToI32U)
+    (I32ToF32S)
+    (I32ToF32U)
+    (F64ToI64S)
+    (F64ToI64U)
+    (I64ToF64S)
+    (I64ToF64U)
+    ;; Precision changes between float widths. These do not convert in
+    ;; place: `xvcvdpsp` writes its two single-precision results to
+    ;; alternating words and `xvcvspdp` reads its two sources from
+    ;; alternating words, so both need the lanes gathered around them.
+    (F64ToF32)
+    (F32ToF64)
+))
+
 (type VecUnaryOp
   (enum
     (Popcnt)
@@ -474,6 +498,12 @@
       (ra Reg)
       (rb Reg)
       (rc Reg))
+
+    ;; Lane-wise float/integer conversion.
+    (VecCvt
+      (op VecCvtOp)
+      (rd WritableReg)
+      (rn Reg))
 
     ;; Splat a 5-bit signed immediate to every lane (`vspltis{b,h,w}`).
     ;; Useful beyond small constants: the vector shifts read only the
@@ -1104,6 +1134,12 @@
 (rule (vec_insert_lane rv rs ty lane)
   (let ((dst WritableReg (temp_writable_reg $I8X16))
         (_ Unit (emit (MInst.VecInsertLane dst rv rs ty lane))))
+    dst))
+
+(decl vec_cvt (VecCvtOp Reg) Reg)
+(rule (vec_cvt op rn)
+  (let ((dst WritableReg (temp_writable_reg $I8X16))
+        (_ Unit (emit (MInst.VecCvt op dst rn))))
     dst))
 
 (decl vec_splt_imm (i8 Type) Reg)

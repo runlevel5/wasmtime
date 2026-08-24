@@ -1795,6 +1795,22 @@ impl MachInstEmit for Inst {
                 ));
             }
 
+            &Inst::VecCvt { op, rd, rn } => {
+                let xo = match op {
+                    VecCvtOp::F32ToI32S => 152, // xvcvspsxws
+                    VecCvtOp::F32ToI32U => 136, // xvcvspuxws
+                    VecCvtOp::I32ToF32S => 184, // xvcvsxwsp
+                    VecCvtOp::I32ToF32U => 168, // xvcvuxwsp
+                    VecCvtOp::F64ToI64S => 472, // xvcvdpsxds
+                    VecCvtOp::F64ToI64U => 456, // xvcvdpuxds
+                    VecCvtOp::I64ToF64S => 504, // xvcvsxddp
+                    VecCvtOp::I64ToF64U => 488, // xvcvuxddp
+                    VecCvtOp::F64ToF32 => 393,  // xvcvdpsp
+                    VecCvtOp::F32ToF64 => 457,  // xvcvspdp
+                };
+                sink.put4(enc_xx2(vsr_num(rd.to_reg()), vsr_num(rn), xo));
+            }
+
             &Inst::VecSpltImm { rd, imm, ty } => {
                 let xo = match ty.lane_bits() {
                     8 => 780,  // vspltisb

@@ -30,7 +30,7 @@ use crate::isa::ppc64::abi::Ppc64MachineDeps;
 
 pub use crate::isa::ppc64::lower::isle::generated_code::{
     AluImmOp, AluOp, BitOp, DivOp, FpuOp1, FpuOp2, FpuRoundMode, LoadOP, MInst as Inst, ShiftOp,
-    StoreOP, VecAluOp, VecAluOp4, VecFpuOp1, VecFpuOp2, VecUnaryOp,
+    StoreOP, VecAluOp, VecAluOp4, VecCvtOp, VecFpuOp1, VecFpuOp2, VecUnaryOp,
     UnaryOp,
 };
 
@@ -213,6 +213,10 @@ fn ppc64_get_operands(inst: &mut Inst, collector: &mut impl OperandVisitor) {
             collector.reg_use(ra);
             collector.reg_use(rb);
             collector.reg_use(rc);
+            collector.reg_def(rd);
+        }
+        Inst::VecCvt { rd, rn, .. } => {
+            collector.reg_use(rn);
             collector.reg_def(rd);
         }
         Inst::VecSpltImm { rd, .. } => {
@@ -1085,6 +1089,21 @@ impl Inst {
                     reg(*rb),
                     reg(*rc)
                 )
+            }
+            Inst::VecCvt { op, rd, rn } => {
+                let mnemonic = match op {
+                    VecCvtOp::F32ToI32S => "xvcvspsxws",
+                    VecCvtOp::F32ToI32U => "xvcvspuxws",
+                    VecCvtOp::I32ToF32S => "xvcvsxwsp",
+                    VecCvtOp::I32ToF32U => "xvcvuxwsp",
+                    VecCvtOp::F64ToI64S => "xvcvdpsxds",
+                    VecCvtOp::F64ToI64U => "xvcvdpuxds",
+                    VecCvtOp::I64ToF64S => "xvcvsxddp",
+                    VecCvtOp::I64ToF64U => "xvcvuxddp",
+                    VecCvtOp::F64ToF32 => "xvcvdpsp",
+                    VecCvtOp::F32ToF64 => "xvcvspdp",
+                };
+                format!("{mnemonic} {}, {}", wreg(*rd), reg(*rn))
             }
             Inst::VecSpltImm { rd, imm, ty } => {
                 format!("vspltis{} {}, {imm}", ty.lane_bits(), wreg(*rd))

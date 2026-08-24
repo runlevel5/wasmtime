@@ -1931,3 +1931,79 @@
   (output_reg (iadd_pairwise_via (put_in_reg x) (put_in_reg y)
                                  (vec_splat_lane (mov_to_vec (imm $I64 32)) $I64X2)
                                  $I64X2)))
+
+;;;; Float/integer lane conversions ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; The hardware conversions truncate toward zero and saturate to the
+;; representable range, matching CLIF's saturating conversions. Their
+;; NaN behaviour differs by signedness, which was measured on a POWER9
+;; rather than taken from the manual: an unsigned conversion already
+;; yields zero for a NaN lane, which is what CLIF wants, but a signed
+;; one yields the most negative value. So the signed rules mask the
+;; result with the source compared against itself -- all ones for an
+;; ordered lane, all zeros where the source was NaN.
+
+(decl fcvt_to_sint_sat_masked (VecCvtOp VecFpuOp2 Value Type) Reg)
+(rule (fcvt_to_sint_sat_masked cvt cmp x ty)
+  (let ((xr Reg (put_in_reg x))
+        (converted Reg (vec_cvt cvt xr))
+        (ordered Reg (vec_fpu_rrr cmp xr xr ty)))
+    (vec_alu_rrr (VecAluOp.And) converted ordered ty)))
+
+(rule 2 (lower (fcvt_to_sint_sat $I32X4 x @ (value_type $F32X4)))
+  (output_reg (fcvt_to_sint_sat_masked (VecCvtOp.F32ToI32S) (VecFpuOp2.CmpEq)
+                                       x $F32X4)))
+
+(rule 2 (lower (fcvt_to_sint_sat $I64X2 x @ (value_type $F64X2)))
+  (output_reg (fcvt_to_sint_sat_masked (VecCvtOp.F64ToI64S) (VecFpuOp2.CmpEq)
+                                       x $F64X2)))
+
+;; No mask needed: these already give zero for a NaN lane, and zero for
+;; a negative source, both of which are what CLIF specifies.
+(rule 2 (lower (fcvt_to_uint_sat $I32X4 x @ (value_type $F32X4)))
+  (output_reg (vec_cvt (VecCvtOp.F32ToI32U) (put_in_reg x))))
+
+(rule 2 (lower (fcvt_to_uint_sat $I64X2 x @ (value_type $F64X2)))
+  (output_reg (vec_cvt (VecCvtOp.F64ToI64U) (put_in_reg x))))
+
+(rule 2 (lower (fcvt_from_sint $F32X4 x @ (value_type $I32X4)))
+  (output_reg (vec_cvt (VecCvtOp.I32ToF32S) (put_in_reg x))))
+
+(rule 2 (lower (fcvt_from_uint $F32X4 x @ (value_type $I32X4)))
+  (output_reg (vec_cvt (VecCvtOp.I32ToF32U) (put_in_reg x))))
+
+(rule 2 (lower (fcvt_from_sint $F64X2 x @ (value_type $I64X2)))
+  (output_reg (vec_cvt (VecCvtOp.I64ToF64S) (put_in_reg x))))
+
+(rule 2 (lower (fcvt_from_uint $F64X2 x @ (value_type $I64X2)))
+  (output_reg (vec_cvt (VecCvtOp.I64ToF64U) (put_in_reg x))))
+
+;;;; Precision changes between float vector widths ;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; Neither instruction converts in place, so each needs the lanes moved
+;; around it. Both derivations below use the standing identity that
+;; little-endian lane i is big-endian element (count - 1 - i).
+;;
+;; `xvcvdpsp` writes the conversion of big-endian doubleword 0 to
+;; big-endian word 0 and of doubleword 1 to word 2 -- that is, in
+;; little-endian terms, the results of lanes 0 and 1 land in word lanes
+;; 1 and 3, each sitting in the *high* word of its doubleword. Rotating
+;; each doubleword by 32 brings both down to their low words, and then
+;; packing the low words of the rotated value against a zero vector
+;; puts them in result lanes 0 and 1 with the upper two zeroed, which is
+;; what `fvdemote` specifies.
+(rule (lower (fvdemote _ x @ (value_type $F64X2)))
+  (let ((converted Reg (vec_cvt (VecCvtOp.F64ToF32) (put_in_reg x)))
+        (amt Reg (vec_splat_lane (mov_to_vec (imm $I64 32)) $I64X2))
+        (lowered Reg (vec_alu_rrr (VecAluOp.RotlDword) converted amt $I64X2)))
+    (output_reg (vec_alu_rrr (VecAluOp.PackMod) (vec_zero) lowered $I64X2))))
+
+;; `xvcvspdp` reads from big-endian words 0 and 2, which are
+;; little-endian word lanes 3 and 1 -- the high word of each doubleword.
+;; So the two lanes to be promoted have to be moved there first, and
+;; merging the source against zero does exactly that: the merge places
+;; its first operand's lanes in the odd little-endian positions, leaving
+;; lanes 0 and 1 of the source at word lanes 1 and 3.
+(rule (lower (fvpromote_low _ x @ (value_type $F32X4)))
+  (let ((spread Reg (vec_alu_rrr (VecAluOp.MergeLow) (put_in_reg x) (vec_zero) $I32X4)))
+    (output_reg (vec_cvt (VecCvtOp.F32ToF64) spread))))

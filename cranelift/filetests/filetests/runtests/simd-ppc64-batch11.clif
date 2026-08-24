@@ -1,0 +1,75 @@
+test interpret
+test run
+target powerpc64le
+target powerpc64le has_isa_3_0
+
+;; Lane conversions. The NaN and out-of-range cases are the point: the
+;; hardware's signed float-to-int gives the most negative value for a
+;; NaN lane where CLIF wants zero, so those lanes are masked.
+
+function %f32_to_i32_s(f32x4) -> i32x4 {
+block0(v0: f32x4):
+    v1 = fcvt_to_sint_sat.i32x4 v0
+    return v1
+}
+; run: %f32_to_i32_s([0x1.0p0 -0x1.8p1 0x1.ep2 -0x0.0]) == [1 -3 7 0]
+; run: %f32_to_i32_s([+NaN -NaN 0x0.0 0x1.0p0]) == [0 0 0 1]
+; run: %f32_to_i32_s([+Inf -Inf 0x1.0p40 -0x1.0p40]) == [0x7fffffff -2147483648 0x7fffffff -2147483648]
+
+function %f32_to_i32_u(f32x4) -> i32x4 {
+block0(v0: f32x4):
+    v1 = fcvt_to_uint_sat.i32x4 v0
+    return v1
+}
+; run: %f32_to_i32_u([0x1.0p0 0x1.8p1 0x1.ep2 0x0.0]) == [1 3 7 0]
+; run: %f32_to_i32_u([+NaN -NaN -0x1.0p0 0x1.0p0]) == [0 0 0 1]
+; run: %f32_to_i32_u([+Inf -Inf 0x1.0p40 -0x1.0p40]) == [0xffffffff 0 0xffffffff 0]
+
+function %f64_to_i64_s(f64x2) -> i64x2 {
+block0(v0: f64x2):
+    v1 = fcvt_to_sint_sat.i64x2 v0
+    return v1
+}
+; run: %f64_to_i64_s([0x1.8p1 -0x1.8p1]) == [3 -3]
+; run: %f64_to_i64_s([+NaN -NaN]) == [0 0]
+; run: %f64_to_i64_s([+Inf -Inf]) == [0x7fffffffffffffff -9223372036854775808]
+
+function %f64_to_i64_u(f64x2) -> i64x2 {
+block0(v0: f64x2):
+    v1 = fcvt_to_uint_sat.i64x2 v0
+    return v1
+}
+; run: %f64_to_i64_u([0x1.8p1 -0x1.8p1]) == [3 0]
+; run: %f64_to_i64_u([+NaN +Inf]) == [0 0xffffffffffffffff]
+
+function %i32_to_f32_s(i32x4) -> f32x4 {
+block0(v0: i32x4):
+    v1 = fcvt_from_sint.f32x4 v0
+    return v1
+}
+; run: %i32_to_f32_s([1 -3 7 0]) == [0x1.0p0 -0x1.8p1 0x1.cp2 0x0.0]
+; run: %i32_to_f32_s([-2147483648 2147483647 -1 2]) == [-0x1.0p31 0x1.0p31 -0x1.0p0 0x1.0p1]
+
+function %i32_to_f32_u(i32x4) -> f32x4 {
+block0(v0: i32x4):
+    v1 = fcvt_from_uint.f32x4 v0
+    return v1
+}
+; run: %i32_to_f32_u([1 3 7 0]) == [0x1.0p0 0x1.8p1 0x1.cp2 0x0.0]
+; run: %i32_to_f32_u([0xffffffff 0x80000000 2 4]) == [0x1.0p32 0x1.0p31 0x1.0p1 0x1.0p2]
+
+function %i64_to_f64_s(i64x2) -> f64x2 {
+block0(v0: i64x2):
+    v1 = fcvt_from_sint.f64x2 v0
+    return v1
+}
+; run: %i64_to_f64_s([3 -3]) == [0x1.8p1 -0x1.8p1]
+; run: %i64_to_f64_s([-9223372036854775808 1]) == [-0x1.0p63 0x1.0p0]
+
+function %i64_to_f64_u(i64x2) -> f64x2 {
+block0(v0: i64x2):
+    v1 = fcvt_from_uint.f64x2 v0
+    return v1
+}
+; run: %i64_to_f64_u([3 0]) == [0x1.8p1 0x0.0]
+; run: %i64_to_f64_u([0xffffffffffffffff 0x8000000000000000]) == [0x1.0p64 0x1.0p63]

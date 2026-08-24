@@ -1,0 +1,36 @@
+test interpret
+test run
+target powerpc64le
+target powerpc64le has_isa_3_0
+
+;; Precision changes need lane gathers, so the values are distinct and
+;; asymmetric: a gather that picked the wrong word would show.
+
+function %demote(f64x2) -> f32x4 {
+block0(v0: f64x2):
+    v1 = fvdemote v0
+    return v1
+}
+; run: %demote([0x1.0p0 0x1.0p1]) == [0x1.0p0 0x1.0p1 0x0.0 0x0.0]
+; run: %demote([-0x1.5p3 0x1.921fb4p1]) == [-0x1.5p3 0x1.921fb4p1 0x0.0 0x0.0]
+; run: %demote([0x0.0 -0x0.0]) == [0x0.0 -0x0.0 0x0.0 0x0.0]
+; run: %demote([+Inf -Inf]) == [+Inf -Inf 0x0.0 0x0.0]
+
+function %promote(f32x4) -> f64x2 {
+block0(v0: f32x4):
+    v1 = fvpromote_low v0
+    return v1
+}
+; run: %promote([0x1.0p0 0x1.0p1 0x1.0p2 0x1.0p3]) == [0x1.0p0 0x1.0p1]
+; run: %promote([-0x1.5p3 0x1.921fb4p1 0x0.0 0x0.0]) == [-0x1.5p3 0x1.921fb4p1]
+; run: %promote([0x0.0 -0x0.0 0x1.0p0 0x1.0p0]) == [0x0.0 -0x0.0]
+; run: %promote([+Inf -Inf 0x1.0p0 0x1.0p0]) == [+Inf -Inf]
+
+;; Round trip: promoting the low half of a demoted pair returns it.
+function %roundtrip(f64x2) -> f64x2 {
+block0(v0: f64x2):
+    v1 = fvdemote v0
+    v2 = fvpromote_low v1
+    return v2
+}
+; run: %roundtrip([0x1.0p0 -0x1.5p3]) == [0x1.0p0 -0x1.5p3]
