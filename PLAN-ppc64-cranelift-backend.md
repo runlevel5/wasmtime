@@ -1125,6 +1125,57 @@ that way) and compare raw bits through a bitcast, so the payload is
 actually checked rather than merely NaN-ness. Enables four upstream
 vector min/max tests.
 
+#### 64-bit vector types — closed as a declared gap (2026-08-24)
+
+`i8x8`, `i16x4`, `i32x2`, `f32x2` and friends **will not be
+implemented**, and the reasoning is worth keeping because the item had
+been carried as "blocking further upstream tests" since batch 10.
+
+Evidence gathered before deciding:
+
+- **wasm never produces them.** The wasm-to-CLIF frontend
+  (`crates/cranelift/`) refers to `I8X16` fifty times and to any
+  64-bit vector type *zero* times. wasm SIMD is v128-only, so this is
+  worth nothing to the wasmtime use case that Tier 3 is about.
+- **s390x does not support them either**, and it is the closest
+  analogue to this backend: a 128-bit-only vector unit on a
+  big-endian-heritage target. Its `rc_for_type` accepts vectors only
+  when `ty.bits() == 128`, exactly as ours does.
+- **Upstream does not expect them.** None of the eighteen runtests that
+  use these types lists `s390x` as a target; they are gated to
+  aarch64, riscv64-with-V, and x86_64 only.
+- **ELFv2 has no 8-byte vector type**, so unlike every other ABI
+  question in this backend there is no native convention to match --
+  any choice would be invented and unverifiable against GCC or Clang.
+
+Cost, for the record: the eighteen tests need about twenty op families,
+including the awkward ones -- `vall_true`/`vany_true` and
+`iadd_pairwise`, the four widening ops, `scalar_to_vector`, and
+`bitcast` across widths. Worse than the op count, it would introduce a
+new cross-cutting invariant ("the upper 64 bits of the register are
+undefined") that every reduction and widening rule would have to
+respect. That is the same class of invariant as the f32-held-widened-in-
+an-FPR decision, which already cost a debugging session when a spill
+copied the wrong width -- and this one would buy nothing for wasm.
+
+The gap is **safe**: `rc_for_type` returns a clean
+`Unsupported("type not yet supported by the ppc64 backend: i8x8")`
+compile error rather than panicking, verified. Nothing miscompiles;
+these types simply cannot be compiled.
+
+Reversible if a non-wasm Cranelift user ever needs them. The
+representation to pick would be "value in the low doubleword, upper
+doubleword undefined", with masking in the reductions.
+
+**Follow-up now unblocked:** `supports_simd` for `Powerpc64le` in
+`cranelift/fuzzgen/src/target_isa_extras.rs` is still `false` from when
+there were no vector lowerings at all. fuzzgen's type pool contains
+only 128-bit vectors (`I8X16`, `I16X8`, `I32X4`, `I64X2`, `F32X4`,
+`F64X2`) -- no 64-bit ones -- so flipping it to `true` once the v128
+grid is complete will not run into the gap above. Worth doing at the
+end of Phase 5, not before, since fuzzgen would otherwise spend its
+budget on unimplemented ops.
+
 ### Phase 6 — Tuning
 
 POWER9/10 fast paths (`isel`, `setb`, mod instructions, P10 pcrel to kill
