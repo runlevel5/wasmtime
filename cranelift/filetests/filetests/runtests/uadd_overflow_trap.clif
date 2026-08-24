@@ -9,6 +9,7 @@ target pulley32
 target pulley32be
 target pulley64
 target pulley64be
+target powerpc64le
 
 ; NOTE: we don't currently have infrastructure for testing for traps, so these
 ; tests can only test the happy path. Once we eventually have annotations for

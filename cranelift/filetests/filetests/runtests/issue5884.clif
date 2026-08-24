@@ -4,6 +4,7 @@ target x86_64
 target riscv64
 target riscv64 has_c has_zcb
 target s390x
+target powerpc64le
 
 
 function %a(i64, i16) -> i16 {

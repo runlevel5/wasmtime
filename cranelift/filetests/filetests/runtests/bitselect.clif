@@ -13,6 +13,7 @@ target s390x
 target s390x has_mie3
 target riscv64
 target x86_64
+target powerpc64le
 
 function %bitselect_i8(i8, i8, i8) -> i8 {
 block0(v0: i8, v1: i8, v2: i8):

@@ -5,6 +5,7 @@ target s390x
 target x86_64
 target riscv64
 target riscv64 has_c has_zcb
+target powerpc64le
 
 function %a(i8) -> i8 sext system_v {
     ss2 = explicit_slot 2

@@ -3,6 +3,7 @@ test run
 target aarch64
 target x86_64 has_sse3 has_ssse3 has_sse41
 target s390x
+target powerpc64le
 
 ;; Store at a fixed slot offset, then load it back through
 ;; `base + (extended index) + offset`, so the computed addressing mode must

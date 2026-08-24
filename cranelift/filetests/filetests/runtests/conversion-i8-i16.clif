@@ -4,6 +4,7 @@ target aarch64
 target s390x
 target riscv64 has_c has_zcb
 target riscv64
+target powerpc64le
 
 function %f32_to_i8(f32) -> i8 {
 block0(v0: f32):

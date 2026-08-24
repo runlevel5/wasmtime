@@ -5,6 +5,7 @@ target s390x
 target aarch64
 target riscv64
 target riscv64 has_c has_zcb
+target powerpc64le
 
 
 

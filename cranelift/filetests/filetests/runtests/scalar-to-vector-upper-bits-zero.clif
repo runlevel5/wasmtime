@@ -12,6 +12,7 @@ target x86_64 sse42
 target x86_64 sse42 has_avx
 target riscv64 has_v
 target riscv64 has_v has_c has_zcb
+target powerpc64le
 
 function u1:1() -> f64 fast {
     ss0 = explicit_slot 32

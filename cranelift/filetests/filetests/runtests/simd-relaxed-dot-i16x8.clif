@@ -4,6 +4,7 @@ target aarch64
 target aarch64 has_dotprod
 target x86_64 has_sse3 has_ssse3 has_sse41
 target s390x
+target powerpc64le
 
 ;; Test the wasm `i16x8.relaxed_dot_i8x16_i7x16_s` deterministic lowering
 function %relaxed_dot_i16x8(i8x16, i8x16) -> i16x8 {

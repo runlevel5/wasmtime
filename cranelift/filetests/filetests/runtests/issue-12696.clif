@@ -1,5 +1,6 @@
 test run
 target aarch64
+target powerpc64le
 
 function %iadd_repro() -> i64x2 {
 block0:

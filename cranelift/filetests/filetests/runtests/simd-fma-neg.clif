@@ -9,6 +9,7 @@ target pulley32
 target pulley32be
 target pulley64
 target pulley64be
+target powerpc64le
 
 ;; This file is not enabled in the interpreter since SIMD fneg is currently broken
 ;; there.

@@ -1,6 +1,7 @@
 test run
 target x86_64 has_avx has_fma
 target aarch64
+target powerpc64le
 
 function %fma_fneg_rec(f64x2, f64x2, f64x2) -> f64x2 {
 block0(v1: f64x2, v2: f64x2, v3: f64x2):

@@ -7,6 +7,7 @@ target riscv64
 target riscv64 has_c has_zcb
 target pulley64
 target pulley64be
+target powerpc64le
 
 function %stack_addr_iadd(i64) -> i8 {
     ss0 = explicit_slot 16

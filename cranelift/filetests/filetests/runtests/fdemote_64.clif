@@ -7,6 +7,7 @@ target aarch64
 target riscv64
 target pulley64
 target pulley64be
+target powerpc64le
 
 ;; Tests a fdemote+load combo which some backends may optimize
 function %fdemote_load(i64, f64) -> f32 {

@@ -56,12 +56,30 @@
 (rule 1 (lower (umulhi $I64 x y))
   (output_reg (ppc_mulhdu (put_in_reg x) (put_in_reg y))))
 
-;; The word forms read only the low 32 bits of each operand, so an i32
-;; needs no narrowing; anything smaller is extended to a full word first.
-(rule 0 (lower (smulhi (fits_in_32 ty) x y))
-  (output_reg (ppc_mulhw (put_in_ext_reg x ty true) (put_in_ext_reg y ty true))))
-(rule 0 (lower (umulhi (fits_in_32 ty) x y))
-  (output_reg (ppc_mulhwu (put_in_ext_reg x ty false) (put_in_ext_reg y ty false))))
+;; The word forms give the high half of a *32-bit* product, which is
+;; what `i32` asks for and needs no narrowing of the operands.
+(rule 1 (lower (smulhi $I32 x y))
+  (output_reg (ppc_mulhw (put_in_reg x) (put_in_reg y))))
+(rule 1 (lower (umulhi $I32 x y))
+  (output_reg (ppc_mulhwu (put_in_reg x) (put_in_reg y))))
+
+;; For a narrower type the wanted half is the high half of *that*
+;; width, not of a word: `umulhi.i8(255, 255)` is 0xFE01 >> 8, and
+;; taking a word's high half would give zero. So the operands are
+;; extended, the whole product formed -- two extended 16-bit values
+;; cannot overflow a doubleword -- and shifted down by the type's
+;; width. The bits left above the result are outside the type and so
+;; are don't-care.
+(rule 0 (lower (smulhi (fits_in_16 ty) x y))
+  (output_reg
+    (gen_shift (ShiftOp.Srad)
+               (ppc_mulld (put_in_ext_reg x ty true) (put_in_ext_reg y ty true))
+               (imm $I64 (ty_bits_u64 ty)))))
+(rule 0 (lower (umulhi (fits_in_16 ty) x y))
+  (output_reg
+    (gen_shift (ShiftOp.Srd)
+               (ppc_mulld (put_in_ext_reg x ty false) (put_in_ext_reg y ty false))
+               (imm $I64 (ty_bits_u64 ty)))))
 
 ;; Extend a value to a full 64-bit register unless it already fills the
 ;; low word, which the word-wide instructions read in full.
@@ -2310,3 +2328,103 @@
                                 (vec_alu_rrr (VecAluOp.Xor) xr yr $I64X2)
                                 one $I64X2)
                    $I64X2))))
+
+;;;; Bitcasts between `i128` and a 128-bit vector ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; Same sixteen bytes, different register classes: the vector in one
+;; register, the integer in a pair of GPRs holding the low doubleword
+;; first. Little-endian lanes 0-7 are big-endian doubleword 1 and lanes
+;; 8-15 are doubleword 0, so the pair's low half is `i64x2` lane 0 and
+;; its high half is lane 1 -- which is also why the vector direction
+;; can reuse the constant-materialization permute, whose whole job is
+;; putting a high half in big-endian doubleword 0.
+
+(rule 9 (lower (bitcast $I128 _ x @ (value_type (ty_vec128 _))))
+  (let ((xr Reg (put_in_reg x)))
+    (output (value_regs (vec_extract_lane_int xr $I64X2 0)
+                        (vec_extract_lane_int xr $I64X2 1)))))
+
+(rule 8 (lower (bitcast (ty_vec128 _) _ x @ (value_type $I128)))
+  (let ((xs ValueRegs (put_in_regs x)))
+    (output_reg (vec_permdi (mov_to_vec (hi xs)) (mov_to_vec (lo xs)) 0))))
+
+;;;; Vector `ineg` ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; No lane-wise negate exists; subtracting from zero is the whole of it,
+;; at either register width.
+
+(rule 3 (lower (ineg (ty_vec_any ty) x))
+  (output_reg (vec_alu_rrr (VecAluOp.Sub) (vec_zero) (put_in_reg x) ty)))
+
+;;;; Vector `select` ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; The condition is a scalar but the select is over vectors, so it has
+;; to be widened into an all-ones or all-zeros mask for `xxsel`.
+;; Negating the 0/1 that the comparison produces gives 0 or -1, and
+;; splatting that doubleword fills the register either way -- so the
+;; mask is right whichever half a 64-bit vector occupies.
+
+(decl vec_mask_from_cond (Value Type) Reg)
+(rule (vec_mask_from_cond c cty)
+  (vec_splat_lane
+    (mov_to_vec
+      (gen_unary (UnaryOp.Neg)
+                 (cmp_set (int_compare (IntCC.NotEqual)
+                                       (put_in_cmp_reg c (IntCC.NotEqual) cty)
+                                       (imm $I64 0)
+                                       cty))))
+    $I64X2))
+
+(rule 9 (lower (select (ty_vec_any _) c @ (value_type (fits_in_64 cty)) x y))
+  (output_reg (vec_sel (put_in_reg x) (put_in_reg y) (vec_mask_from_cond c cty))))
+
+;;;; `scalar_to_vector` ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; Lane 0 takes the scalar and every other lane is zeroed. `mtvsrd`
+;; lands the value in big-endian doubleword 0, which is the *high*
+;; lanes, so the permute both moves it down to lane 0's doubleword and
+;; brings a zero in above it. Narrow scalars are zero-extended first,
+;; since the bits above them become lanes of their own.
+
+(decl scalar_to_vec (Reg) Reg)
+(rule (scalar_to_vec x) (vec_permdi (vec_zero) (mov_to_vec x) 0))
+
+(rule 1 (lower (scalar_to_vector _ x @ (value_type (ty_int ity))))
+  (output_reg (scalar_to_vec (gen_extend (put_in_reg x) false (ty_bits ity) 64))))
+
+(rule 3 (lower (scalar_to_vector _ x @ (value_type $F64)))
+  (output_reg (scalar_to_vec (mov_from_fpr (put_in_reg x)))))
+
+(rule 2 (lower (scalar_to_vector _ x @ (value_type $F32)))
+  (output_reg (scalar_to_vec (f32_to_bits (put_in_reg x)))))
+
+;;;; Byte-lane multiply ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; There is no byte multiply. The even/odd forms give the full halfword
+;; product of alternating byte lanes, and the low byte of each of those
+;; is the wanted lane, so a truncating pack of the two collects them.
+;; The mnemonics' "even" and "odd" are big-endian element numbers, so
+;; under this backend's lane order `vmuleub` supplies the odd lanes;
+;; and the pack puts its first operand in the little-endian high lanes,
+;; which is where those odd-lane products belong.
+
+(rule 5 (lower (imul $I8X16 x y))
+  (let ((xr Reg (put_in_reg x))
+        (yr Reg (put_in_reg y))
+        ;; Halfword products of alternating byte lanes. Working through
+        ;; the element numbering: `vmuleub` reads big-endian bytes 2i,
+        ;; which are the *odd* little-endian lanes, and leaves the
+        ;; product for lane 2j+1 in halfword lane j; `vmuloub`
+        ;; correspondingly leaves lane 2j's product in halfword lane j.
+        (odd Reg (vec_alu_rrr (VecAluOp.MulEvenU) xr yr $I8X16))
+        (even Reg (vec_alu_rrr (VecAluOp.MulOddU) xr yr $I8X16))
+        (eight Reg (vec_splt_imm 8 $I16X8))
+        ;; Each result halfword wants lane 2j's product byte below
+        ;; lane 2j+1's, so the two are interleaved rather than packed:
+        ;; a truncating pack would concatenate the even lanes' bytes
+        ;; and then the odd lanes', which is a de-interleaved order.
+        (odd_hi Reg (vec_alu_rrr (VecAluOp.Shl) odd eight $I16X8))
+        (byte_mask Reg (vec_alu_rrr (VecAluOp.ShrU)
+                                    (vec_splt_imm -1 $I8X16) eight $I16X8))
+        (even_lo Reg (vec_alu_rrr (VecAluOp.And) even byte_mask $I16X8)))
+    (output_reg (vec_alu_rrr (VecAluOp.Or) odd_hi even_lo $I8X16))))

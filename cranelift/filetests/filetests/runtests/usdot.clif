@@ -16,6 +16,7 @@ target aarch64
 target aarch64 has_i8mm
 target x86_64
 target s390x
+target powerpc64le
 
 function %usdot_mixed(i32x4, i8x16, i8x16) -> i32 {
 block0(v0: i32x4, v1: i8x16, v2: i8x16):

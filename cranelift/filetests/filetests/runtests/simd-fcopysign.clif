@@ -5,6 +5,7 @@ target aarch64
 set enable_multi_ret_implicit_sret
 target riscv64 has_v
 target riscv64 has_v has_c has_zcb
+target powerpc64le
 ; x86_64 does not support SIMD fcopysign.
 
 function %fcopysign_f32x4(f32x4, f32x4) -> f32x4 {

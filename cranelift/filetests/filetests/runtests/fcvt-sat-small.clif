@@ -1,6 +1,7 @@
 test run
 target aarch64
 target s390x
+target powerpc64le
 ; x86_64 does not support `fcvt_to_{u,s}int_sat` to integers < 32 bits.
 
 function %fcvt_to_sint_sat_i8(f32) -> i8 {

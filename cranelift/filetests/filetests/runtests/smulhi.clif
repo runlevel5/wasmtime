@@ -12,6 +12,7 @@ target pulley32
 target pulley32be
 target pulley64
 target pulley64be
+target powerpc64le
 
 
 function %smulhi_i8(i8, i8) -> i8 {

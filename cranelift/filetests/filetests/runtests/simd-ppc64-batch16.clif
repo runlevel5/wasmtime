@@ -1,0 +1,52 @@
+test run
+target powerpc64le
+target powerpc64le has_isa_3_0
+
+;; `i128` and `v128` are the same bytes in different register classes.
+;; The pair's low half must come from lane 0, so asymmetric values are
+;; the point: swapping the halves is otherwise invisible.
+;;
+;; (No `test interpret`: the interpreter does not implement bitcasts to
+;; a vector type, which is why the upstream `simd-bitcast-128.clif` has
+;; no such line either.)
+
+function %i64x2_to_i128(i64x2) -> i128 {
+block0(v0: i64x2):
+    v1 = bitcast.i128 little v0
+    return v1
+}
+; run: %i64x2_to_i128([0xBEEF 0xC0FFEE]) == 0x0000000000c0ffee_000000000000beef
+; run: %i64x2_to_i128([-1 127]) == 0x000000000000007f_ffffffffffffffff
+
+function %i128_to_i64x2(i128) -> i64x2 {
+block0(v0: i128):
+    v1 = bitcast.i64x2 little v0
+    return v1
+}
+; run: %i128_to_i64x2(0x0000000000c0ffee_000000000000beef) == [0xBEEF 0xC0FFEE]
+; run: %i128_to_i64x2(0x000000000000007f_ffffffffffffffff) == [-1 127]
+
+function %i8x16_to_i128(i8x16) -> i128 {
+block0(v0: i8x16):
+    v1 = bitcast.i128 little v0
+    return v1
+}
+; run: %i8x16_to_i128([1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16]) == 0x100f0e0d0c0b0a09_0807060504030201
+
+function %i128_to_i8x16(i128) -> i8x16 {
+block0(v0: i128):
+    v1 = bitcast.i8x16 little v0
+    return v1
+}
+; run: %i128_to_i8x16(0x100f0e0d0c0b0a09_0807060504030201) == [1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16]
+
+;; A round trip must be the identity, and going through lane-wise
+;; arithmetic on the way proves the vector really was in lane order.
+function %roundtrip_add(i128) -> i128 {
+block0(v0: i128):
+    v1 = bitcast.i64x2 little v0
+    v2 = iadd v1, v1
+    v3 = bitcast.i128 little v2
+    return v3
+}
+; run: %roundtrip_add(0x0000000000000002_0000000000000001) == 0x0000000000000004_0000000000000002
