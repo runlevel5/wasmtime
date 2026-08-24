@@ -1041,6 +1041,50 @@ Validated on the POWER9: 8 runtests pass against the interpreter, the
 full filetest suite is green, and all seven encodings match `llvm-mc`
 byte-for-byte. Enables six upstream conversion tests.
 
+#### Batch 13 (2026-08-24): byte permutes
+
+One identity carries both lowerings: **over the 32-byte concatenation
+`vperm` addresses, CLIF's little-endian index k is big-endian index
+31 - k**. Reflecting an index also moves it to the other half of the
+concatenation, which is why the sources must be passed in the opposite
+order — the operand swap is not a separate fact to remember but a
+consequence of the reflection. `shuffle` is then one permute against a
+constant-folded control vector.
+
+`swizzle` needs a bounds check, and the interesting part is that **two
+unrelated hazards collapse into one fix**. Indices 16..31 would select
+the second permute source; indices ≥ 32 would have their high bits
+dropped by the five-bit control field and alias back into range. Both
+disappear if the result is masked, and masking pays for itself twice
+over: the single `vcmpgtub` against 15 is both the bounds check and
+(via `vspltisb 15`) the operand of the `15 - idx` subtract, and because
+out-of-range lanes are cleared afterwards the permute can take the
+source register twice instead of needing a zero vector. Five
+instructions, verified in the disassembly as exactly five with no
+spills.
+
+Note the control bytes are `15 - idx`, not `31 - idx`: the wanted byte
+now lies in the *first* source, and reflecting within a single 16-byte
+half is a complement against 15. Getting this wrong is invisible to any
+test whose indices are symmetric about the halfway point, so the
+runtests use asymmetric data throughout.
+
+`vandc` was added as `AndC`, emitted as the VSX `xxlandc` to match how
+the other vector logicals are done here. The `vconst` materialization
+was factored into a `vec_const` helper, since the permute control
+vector needs the same path.
+
+**Deliberately not used: `vpermr`** (POWER9), which is this permute with
+the little-endian index convention and would remove both the reflection
+and the swap. It buys nothing — the reflection is constant-folded for
+`shuffle` and shares an instruction with the bounds check for `swizzle`
+— and it is outside the POWER8 baseline, so it would mean two code
+paths for zero gain.
+
+Validated on the POWER9: batch runtests plus `simd-shuffle` and
+`simd-swizzle` pass natively, the full filetest suite is green, and both
+new encodings match `llvm-mc` byte-for-byte.
+
 ### Phase 6 — Tuning
 
 POWER9/10 fast paths (`isel`, `setb`, mod instructions, P10 pcrel to kill
