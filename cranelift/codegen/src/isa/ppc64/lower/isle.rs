@@ -275,6 +275,30 @@ impl generated_code::Context for Ppc64IsleContext<'_, '_, MInst, Ppc64Backend> {
         (1u64 << ty.bits()) - 1
     }
 
+    /// Whether a vector type's lanes are integers.
+    fn ty_vec_is_int(&mut self, ty: Type) -> bool {
+        ty.lane_type().is_int()
+    }
+
+    /// The 128-bit vector type with the same lane type as `ty`, for
+    /// reusing the 128-bit lane-access paths on a 64-bit vector.
+    fn ty_vec64_widened(&mut self, ty: Type) -> Type {
+        ty.lane_type().by(128 / u32::from(ty.lane_bits())).unwrap()
+    }
+
+    /// A 64-bit vector's lane index, restated as an index into the
+    /// 128-bit type of the same lane width.
+    ///
+    /// Both paths turn a little-endian lane index into a big-endian
+    /// element number by subtracting it from the lane count less one.
+    /// A 64-bit vector sits in big-endian doubleword 0, so its lane `j`
+    /// is big-endian element `n - 1 - j` where `n` is its own lane
+    /// count -- half the 128-bit type's. Adding `n` to the index makes
+    /// the wider path's subtraction land on exactly that element.
+    fn vec64_lane_in_128(&mut self, ty: Type, lane: u8) -> u8 {
+        lane + ty.lane_count() as u8
+    }
+
     /// Matches any vector type that fits in one register: 128-bit, or
     /// the 64-bit types held in big-endian doubleword 0. For rules
     /// whose instruction is position-independent and depends only on

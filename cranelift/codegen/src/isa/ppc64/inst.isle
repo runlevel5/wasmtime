@@ -1383,6 +1383,13 @@
 (decl ty_umax_u64 (Type) u64)
 (extern constructor ty_umax_u64 ty_umax_u64)
 
+(decl pure ty_vec_is_int (Type) bool)
+(extern constructor ty_vec_is_int ty_vec_is_int)
+(decl ty_vec64_widened (Type) Type)
+(extern constructor ty_vec64_widened ty_vec64_widened)
+(decl vec64_lane_in_128 (Type u8) u8)
+(extern constructor vec64_lane_in_128 vec64_lane_in_128)
+
 (decl ty_vec_any (Type) Type)
 (extern extractor ty_vec_any ty_vec_any)
 

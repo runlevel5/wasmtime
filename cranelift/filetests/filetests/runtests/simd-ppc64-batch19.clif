@@ -1,0 +1,121 @@
+test interpret
+test run
+target powerpc64le
+target powerpc64le has_isa_3_0
+
+;; 128-bit lowerings whose derivation is non-obvious and which no
+;; upstream runtest reaches on this target. Expectations are computed
+;; from CLIF's semantics rather than from the lowering, so the
+;; interpreter validates them and the POWER9 validates the code.
+
+function %iadd_pairwise_i32x4(i32x4, i32x4) -> i32x4 {
+block0(v0: i32x4, v1: i32x4):
+    v2 = iadd_pairwise.i32x4 v0, v1
+    return v2
+}
+; run: %iadd_pairwise_i32x4([1 2 3 4], [100 200 300 400]) == [3 7 300 700]
+
+function %iadd_pairwise_i8x16(i8x16, i8x16) -> i8x16 {
+block0(v0: i8x16, v1: i8x16):
+    v2 = iadd_pairwise.i8x16 v0, v1
+    return v2
+}
+; run: %iadd_pairwise_i8x16([1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16], [-1 -2 -3 -4 -5 -6 -7 -8 -9 -10 -11 -12 -13 -14 -15 -16]) == [3 7 11 15 19 23 27 31 -3 -7 -11 -15 -19 -23 -27 -31]
+
+function %swiden_low_i32x4(i32x4) -> i64x2 {
+block0(v0: i32x4):
+    v1 = swiden_low.i32x4 v0
+    return v1
+}
+; run: %swiden_low_i32x4([100000 -200000 7 -8]) == [100000 -200000]
+
+function %swiden_high_i32x4(i32x4) -> i64x2 {
+block0(v0: i32x4):
+    v1 = swiden_high.i32x4 v0
+    return v1
+}
+; run: %swiden_high_i32x4([100000 -200000 7 -8]) == [7 -8]
+
+function %uwiden_low_i32x4(i32x4) -> i64x2 {
+block0(v0: i32x4):
+    v1 = uwiden_low.i32x4 v0
+    return v1
+}
+; run: %uwiden_low_i32x4([-1 -2147483648 1 2]) == [4294967295 2147483648]
+
+function %uwiden_high_i32x4(i32x4) -> i64x2 {
+block0(v0: i32x4):
+    v1 = uwiden_high.i32x4 v0
+    return v1
+}
+; run: %uwiden_high_i32x4([-1 -2147483648 1 2]) == [1 2]
+
+function %imul_i64x2(i64x2, i64x2) -> i64x2 {
+block0(v0: i64x2, v1: i64x2):
+    v2 = imul.i64x2 v0, v1
+    return v2
+}
+; run: %imul_i64x2([4294967298 9223372036854775807], [12884901893 3]) == [47244640266 9223372036854775805]
+
+function %imul_i8x16(i8x16, i8x16) -> i8x16 {
+block0(v0: i8x16, v1: i8x16):
+    v2 = imul.i8x16 v0, v1
+    return v2
+}
+; run: %imul_i8x16([3 -4 5 -6 7 -8 9 127 -128 11 -12 13 -14 15 -16 17], [7 9 -11 13 -15 17 -19 3 -1 21 -23 25 -27 29 -31 33]) == [21 -36 -55 -78 -105 120 85 125 -128 -25 20 69 122 -77 -16 49]
+
+function %smulhi_i8x16(i8x16, i8x16) -> i8x16 {
+block0(v0: i8x16, v1: i8x16):
+    v2 = smulhi.i8x16 v0, v1
+    return v2
+}
+; run: %smulhi_i8x16([3 -4 5 -6 7 -8 9 127 -128 11 -12 13 -14 15 -16 17], [7 9 -11 13 -15 17 -19 3 -1 21 -23 25 -27 29 -31 33]) == [0 -1 -1 -1 -1 -1 -1 1 0 0 1 1 1 1 1 2]
+
+function %umulhi_i8x16(i8x16, i8x16) -> i8x16 {
+block0(v0: i8x16, v1: i8x16):
+    v2 = umulhi.i8x16 v0, v1
+    return v2
+}
+; run: %umulhi_i8x16([-56 3 -1 17 64 -127 7 -6 1 2 3 4 5 6 7 8], [3 -56 -1 19 4 -126 9 -5 -1 -2 -3 -4 -5 -6 -7 -8]) == [2 2 -2 1 1 65 0 -11 0 1 2 3 4 5 6 7]
+
+function %smulhi_i16x8(i16x8, i16x8) -> i16x8 {
+block0(v0: i16x8, v1: i16x8):
+    v2 = smulhi.i16x8 v0, v1
+    return v2
+}
+; run: %smulhi_i16x8([300 -400 500 -32768 7 -8 9 10], [700 900 -1100 3 -11 13 -15 17]) == [3 -6 -9 -2 -1 -1 -1 0]
+
+function %umulhi_i16x8(i16x8, i16x8) -> i16x8 {
+block0(v0: i16x8, v1: i16x8):
+    v2 = umulhi.i16x8 v0, v1
+    return v2
+}
+; run: %umulhi_i16x8([-5536 3 -1 4096 1 2 3 4], [3 -5536 -1 17 -1 -2 -3 -4]) == [2 2 -2 1 0 1 2 3]
+
+function %smulhi_i32x4(i32x4, i32x4) -> i32x4 {
+block0(v0: i32x4, v1: i32x4):
+    v2 = smulhi.i32x4 v0, v1
+    return v2
+}
+; run: %smulhi_i32x4([100000 -200000 7 -8], [300000 -70000 -11 13]) == [6 3 -1 -1]
+
+function %umulhi_i32x4(i32x4, i32x4) -> i32x4 {
+block0(v0: i32x4, v1: i32x4):
+    v2 = umulhi.i32x4 v0, v1
+    return v2
+}
+; run: %umulhi_i32x4([-294967296 123456 1 2], [3 -294967296 -1 -2]) == [2 114977 0 1]
+
+function %snarrow_i16x8(i16x8, i16x8) -> i8x16 {
+block0(v0: i16x8, v1: i16x8):
+    v2 = snarrow.i16x8 v0, v1
+    return v2
+}
+; run: %snarrow_i16x8([300 -400 70 -8 32767 -32768 1 2], [5 -6000 127 -129 3 4 5 6]) == [127 -128 70 -8 127 -128 1 2 5 -128 127 -128 3 4 5 6]
+
+function %unarrow_i16x8(i16x8, i16x8) -> i8x16 {
+block0(v0: i16x8, v1: i16x8):
+    v2 = unarrow.i16x8 v0, v1
+    return v2
+}
+; run: %unarrow_i16x8([300 -400 70 -8 32767 -32768 1 2], [5 -6000 127 -129 3 4 5 6]) == [-1 0 70 0 -1 0 1 2 5 0 127 0 3 4 5 6]

@@ -162,3 +162,24 @@ block0(v0: i8, v1: f64, v2: f64):
 }
 ; run: %ssg_f64(1, 0x1.0, 0x2.0) == 0x1.0
 ; run: %ssg_f64(0, 0x1.0, 0x2.0) == 0x2.0
+
+;; `avg_round` on `i64x2`, which has no instruction and is lowered as
+;; `(a | b) - ((a ^ b) >> 1)`. The identity is exact where `a + b + 1`
+;; would overflow a doubleword, which is the case worth testing and the
+;; reason the obvious add-and-shift is not used. Unsigned semantics.
+;; (The interpreter has no implementation for this one, hence its place
+;; in this run-only file.)
+function %avg_round_i64x2(i64x2, i64x2) -> i64x2 {
+block0(v0: i64x2, v1: i64x2):
+    v2 = avg_round.i64x2 v0, v1
+    return v2
+}
+; run: %avg_round_i64x2([-1 -9223372036854775807], [-1 -9223372036854775805]) == [-1 -9223372036854775806]
+
+function %avg_round_i64x2_small(i64x2, i64x2) -> i64x2 {
+block0(v0: i64x2, v1: i64x2):
+    v2 = avg_round.i64x2 v0, v1
+    return v2
+}
+; run: %avg_round_i64x2_small([7 0], [8 1]) == [8 1]
+

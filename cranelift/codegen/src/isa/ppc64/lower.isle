@@ -2873,3 +2873,30 @@
   (output_reg (narrow64 (VecAluOp.PackSU) x y in_ty)))
 (rule 1 (lower (uunarrow _ x @ (value_type (ty_vec64 in_ty)) y))
   (output_reg (narrow64 (VecAluOp.PackUU) x y in_ty)))
+
+;;;; Lane access on 64-bit vectors ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; Both lane-access paths turn a little-endian lane index into a
+;; big-endian element number by subtracting it from the lane count less
+;; one. A 64-bit vector occupies big-endian doubleword 0, so its lane j
+;; is big-endian element n - 1 - j for its *own* lane count n -- half
+;; the 128-bit type's. Restating the index as `lane + n` makes the wider
+;; path's subtraction land on exactly that element, so these reuse it
+;; rather than duplicating the element arithmetic.
+
+(rule 1 (lower (extractlane _ x @ (value_type (ty_vec64 ty)) (u8_from_uimm8 lane)))
+  (if-let true (ty_vec_is_int ty))
+  (output_reg (vec_extract_lane_int (put_in_reg x)
+                                    (ty_vec64_widened ty)
+                                    (vec64_lane_in_128 ty lane))))
+
+(rule 2 (lower (extractlane _ x @ (value_type (ty_vec64 ty)) (u8_from_uimm8 lane)))
+  (if-let false (ty_vec_is_int ty))
+  (output_reg (vec_extract_lane_fpu (put_in_reg x)
+                                    (ty_vec64_widened ty)
+                                    (vec64_lane_in_128 ty lane))))
+
+(rule 1 (lower (insertlane _ x @ (value_type (ty_vec64 ty)) y (u8_from_uimm8 lane)))
+  (output_reg (vec_insert_lane (put_in_reg x) (put_in_reg y)
+                               (ty_vec64_widened ty)
+                               (vec64_lane_in_128 ty lane))))
