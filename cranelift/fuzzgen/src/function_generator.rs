@@ -677,6 +677,8 @@ fn valid_for_target(triple: &Triple, op: Opcode, args: &[Type], rets: &[Type]) -
                     &[I128, I128],
                     _
                 ),
+                // Nor is the 128-bit high half of a product.
+                (Opcode::Umulhi | Opcode::Smulhi, &[I128, I128], _),
                 // Conversions between i128 and floats are not lowered by
                 // any backend (#4933, #4934).
                 (
@@ -692,32 +694,20 @@ fn valid_for_target(triple: &Triple, op: Opcode, args: &[Type], rets: &[Type]) -
                     &[I128],
                     &[F32 | F64]
                 ),
-                // No f16/f128.
-                (_, &[F16 | F128], _),
-                (_, &[_, F16 | F128], _),
-                (_, &[F16 | F128, _], _),
-                (_, _, &[F16 | F128]),
-                // Not yet lowered.
-                (Opcode::UaddOverflow | Opcode::SaddOverflow),
-                (Opcode::UsubOverflow | Opcode::SsubOverflow),
-                (Opcode::UmulOverflow | Opcode::SmulOverflow),
-                // Narrow div/rem is lowered, but i8/i16 min/max of floats
-                // and the sub-word conversions are not exercised yet.
+                // Concatenating to anything but an i128 is not lowered.
+                (Opcode::Iconcat, &[I8 | I16 | I32, I8 | I16 | I32], _),
+                // The ISA has no doubleword saturating arithmetic, no
+                // doubleword high-half multiply before POWER10, and its
+                // rounding multiply is halfword-only. Nothing in wasm or
+                // in the runtests reaches these, so they are left out
+                // rather than emulated.
                 (
-                    Opcode::FcvtToUint | Opcode::FcvtToSint,
-                    &[F32 | F64],
-                    &[I8 | I16]
+                    Opcode::UaddSat | Opcode::SaddSat | Opcode::UsubSat | Opcode::SsubSat,
+                    &[I64X2, I64X2],
+                    _
                 ),
-                (
-                    Opcode::FcvtToUintSat | Opcode::FcvtToSintSat,
-                    &[F32 | F64],
-                    &[I8 | I16]
-                ),
-                (
-                    Opcode::FcvtFromUint | Opcode::FcvtFromSint,
-                    &[I8 | I16],
-                    &[F32 | F64]
-                ),
+                (Opcode::Umulhi | Opcode::Smulhi, &[I64X2, I64X2], _),
+                (Opcode::SqmulRoundSat, &[I32X4, I32X4], _),
             )
         }
 

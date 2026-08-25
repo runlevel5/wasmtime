@@ -1,0 +1,164 @@
+test run
+target powerpc64le
+target powerpc64le has_isa_3_0
+
+;; Extending 64-bit vector loads, vector rotates, and the vector forms
+;; of `select_spectre_guard` -- all found missing by driving fuzzgen at
+;; the backend rather than by reading the rules.
+;;
+;; No `test interpret`: the interpreter does not implement all of these,
+;; so the expectations below were derived by hand and are checked
+;; against real execution only.
+
+function %uload8x8(i64) -> i16x8 {
+    ss0 = explicit_slot 16
+
+block0(v0: i64):
+    v1 = stack_addr.i64 ss0
+    store.i64 v0, v1
+    v2 = uload8x8 v1
+    return v2
+}
+; run: %uload8x8(0x8070605040302010) == [0x10 0x20 0x30 0x40 0x50 0x60 0x70 0x80]
+
+function %sload8x8(i64) -> i16x8 {
+    ss0 = explicit_slot 16
+
+block0(v0: i64):
+    v1 = stack_addr.i64 ss0
+    store.i64 v0, v1
+    v2 = sload8x8 v1
+    return v2
+}
+; run: %sload8x8(0x8070605040302010) == [0x10 0x20 0x30 0x40 0x50 0x60 0x70 -128]
+
+function %uload16x4(i64) -> i32x4 {
+    ss0 = explicit_slot 16
+
+block0(v0: i64):
+    v1 = stack_addr.i64 ss0
+    store.i64 v0, v1
+    v2 = uload16x4 v1
+    return v2
+}
+; run: %uload16x4(0x8000600040002000) == [0x2000 0x4000 0x6000 0x8000]
+
+function %sload16x4(i64) -> i32x4 {
+    ss0 = explicit_slot 16
+
+block0(v0: i64):
+    v1 = stack_addr.i64 ss0
+    store.i64 v0, v1
+    v2 = sload16x4 v1
+    return v2
+}
+; run: %sload16x4(0x8000600040002000) == [0x2000 0x4000 0x6000 -32768]
+
+function %uload32x2(i64) -> i64x2 {
+    ss0 = explicit_slot 16
+
+block0(v0: i64):
+    v1 = stack_addr.i64 ss0
+    store.i64 v0, v1
+    v2 = uload32x2 v1
+    return v2
+}
+; run: %uload32x2(0x8000000012345678) == [0x12345678 0x80000000]
+
+function %sload32x2(i64) -> i64x2 {
+    ss0 = explicit_slot 16
+
+block0(v0: i64):
+    v1 = stack_addr.i64 ss0
+    store.i64 v0, v1
+    v2 = sload32x2 v1
+    return v2
+}
+; run: %sload32x2(0x8000000012345678) == [0x12345678 -2147483648]
+
+;; Rotates at every lane width. The amount is masked to the lane width
+;; by the hardware, so an amount at or above it must wrap rather than
+;; produce zero -- which is what separates a rotate from a shift.
+function %rotl_i8x16(i8x16, i8) -> i8x16 {
+block0(v0: i8x16, v1: i8):
+    v2 = rotl v0, v1
+    return v2
+}
+; run: %rotl_i8x16([0x81 0x01 0x02 0x40 0 0 0 0 0 0 0 0 0 0 0 0], 1) == [0x03 0x02 0x04 0x80 0 0 0 0 0 0 0 0 0 0 0 0]
+; run: %rotl_i8x16([0x81 0x01 0x02 0x40 0 0 0 0 0 0 0 0 0 0 0 0], 8) == [0x81 0x01 0x02 0x40 0 0 0 0 0 0 0 0 0 0 0 0]
+
+function %rotr_i8x16(i8x16, i8) -> i8x16 {
+block0(v0: i8x16, v1: i8):
+    v2 = rotr v0, v1
+    return v2
+}
+; run: %rotr_i8x16([0x81 0x01 0x02 0x40 0 0 0 0 0 0 0 0 0 0 0 0], 1) == [0xc0 0x80 0x01 0x20 0 0 0 0 0 0 0 0 0 0 0 0]
+
+function %rotl_i16x8(i16x8, i16) -> i16x8 {
+block0(v0: i16x8, v1: i16):
+    v2 = rotl v0, v1
+    return v2
+}
+; run: %rotl_i16x8([0x8001 1 2 3 4 5 6 7], 1) == [0x0003 2 4 6 8 10 12 14]
+
+function %rotr_i16x8(i16x8, i16) -> i16x8 {
+block0(v0: i16x8, v1: i16):
+    v2 = rotr v0, v1
+    return v2
+}
+; run: %rotr_i16x8([0x8001 2 4 6 8 10 12 14], 1) == [0xc000 1 2 3 4 5 6 7]
+
+function %rotl_i32x4(i32x4, i32) -> i32x4 {
+block0(v0: i32x4, v1: i32):
+    v2 = rotl v0, v1
+    return v2
+}
+; run: %rotl_i32x4([0x80000001 1 2 3], 1) == [3 2 4 6]
+
+function %rotr_i32x4(i32x4, i32) -> i32x4 {
+block0(v0: i32x4, v1: i32):
+    v2 = rotr v0, v1
+    return v2
+}
+; run: %rotr_i32x4([0x80000001 2 4 6], 1) == [0xc0000000 1 2 3]
+
+function %rotl_i64x2(i64x2, i64) -> i64x2 {
+block0(v0: i64x2, v1: i64):
+    v2 = rotl v0, v1
+    return v2
+}
+; run: %rotl_i64x2([0x8000000000000001 1], 1) == [3 2]
+
+function %rotr_i64x2(i64x2, i64) -> i64x2 {
+block0(v0: i64x2, v1: i64):
+    v2 = rotr v0, v1
+    return v2
+}
+; run: %rotr_i64x2([0x8000000000000001 2], 1) == [0xc000000000000000 1]
+
+;; The vector `select_spectre_guard`, with both a narrow and a 128-bit
+;; condition; the latter is true when either half is non-zero.
+function %ssg_vec(i8, i32x4, i32x4) -> i32x4 {
+block0(v0: i8, v1: i32x4, v2: i32x4):
+    v3 = select_spectre_guard v0, v1, v2
+    return v3
+}
+; run: %ssg_vec(1, [1 2 3 4], [5 6 7 8]) == [1 2 3 4]
+; run: %ssg_vec(0, [1 2 3 4], [5 6 7 8]) == [5 6 7 8]
+
+function %ssg_vec_i128(i128, i32x4, i32x4) -> i32x4 {
+block0(v0: i128, v1: i32x4, v2: i32x4):
+    v3 = select_spectre_guard v0, v1, v2
+    return v3
+}
+; run: %ssg_vec_i128(0, [1 2 3 4], [5 6 7 8]) == [5 6 7 8]
+; run: %ssg_vec_i128(0x100000000_00000000, [1 2 3 4], [5 6 7 8]) == [1 2 3 4]
+
+;; The float `select_spectre_guard`, likewise.
+function %ssg_f64(i8, f64, f64) -> f64 {
+block0(v0: i8, v1: f64, v2: f64):
+    v3 = select_spectre_guard v0, v1, v2
+    return v3
+}
+; run: %ssg_f64(1, 0x1.0, 0x2.0) == 0x1.0
+; run: %ssg_f64(0, 0x1.0, 0x2.0) == 0x2.0

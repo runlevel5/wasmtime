@@ -1048,7 +1048,7 @@ impl Inst {
                     VecAluOp::MulOddU => "vmulou",
                     VecAluOp::PackMod => "vpk_um",
                     VecAluOp::MergeEvenWord => "vmrgew",
-                    VecAluOp::RotlDword => "vrld",
+                    VecAluOp::Rotl => "vrl",
                     VecAluOp::BitPermQ => "vbpermq",
                     VecAluOp::And => "xxland",
                     VecAluOp::Or => "xxlor",

@@ -428,6 +428,9 @@ mod tests {
         assert_eq!(enc_va(2, 3, 4, 5, 33), 0x1043_2161); // vmhraddshs
         assert_eq!(enc_va(2, 3, 4, 5, 43), 0x1043_216B); // vperm
         assert_eq!(enc_vx(2, 3, 4, 136), 0x1043_2088); // vmulouw
+        assert_eq!(enc_vx(2, 3, 4, 4), 0x1043_2004); // vrlb
+        assert_eq!(enc_vx(2, 3, 4, 68), 0x1043_2044); // vrlh
+        assert_eq!(enc_vx(2, 3, 4, 132), 0x1043_2084); // vrlw
         assert_eq!(enc_vx(2, 3, 4, 196), 0x1043_20C4); // vrld
         assert_eq!(enc_vx(2, 3, 4, 1356), 0x1043_254C); // vbpermq
         assert_eq!(enc_vx(2, 3, 4, 1476), 0x1043_25C4); // vsld (already used)

@@ -210,8 +210,11 @@
     ;; `vmrgew`: interleave the odd little-endian word lanes of the two
     ;; operands. Word only.
     (MergeEvenWord)
-    ;; Rotate each doubleword left by the per-lane amount (`vrld`).
-    (RotlDword)
+    ;; Rotate each lane left by the per-lane amount
+    ;; (`vrl{b,h,w,d}`). The hardware masks the amount to the lane
+    ;; width, which is what CLIF's rotates want, so a negated amount
+    ;; gives a rotate right.
+    (Rotl)
     ;; `vbpermq`: gather sixteen arbitrary bits of the first operand,
     ;; selected by big-endian bit indices in the bytes of the second,
     ;; into the low halfword. Lane-width-independent -- the indices say

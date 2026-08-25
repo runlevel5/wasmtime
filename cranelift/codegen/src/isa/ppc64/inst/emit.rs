@@ -149,9 +149,6 @@ fn vx_xo(op: VecAluOp, ty: Type) -> u32 {
         64 => 3,
         _ => unreachable!("vector lane width {ty}"),
     };
-    if matches!(op, VecAluOp::RotlDword) {
-        assert_eq!(lane, 64, "vrld operates on doubleword lanes");
-    }
     if matches!(op, VecAluOp::MergeEvenWord) {
         assert_eq!(lane, 32, "vmrgew is a word-lane merge");
     }
@@ -232,7 +229,7 @@ fn vx_xo(op: VecAluOp, ty: Type) -> u32 {
         // byte lane.
         VecAluOp::PackMod => [0, 14, 78, 1102],
         VecAluOp::MergeEvenWord => [0, 0, 1932, 0],
-        VecAluOp::RotlDword => [0, 0, 0, 196],
+        VecAluOp::Rotl => [4, 68, 132, 196],
         // Lane-width-independent: the index vector says which bits.
         VecAluOp::BitPermQ => [1356, 1356, 1356, 1356],
         VecAluOp::And

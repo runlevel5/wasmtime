@@ -15,8 +15,6 @@ impl TargetIsaExtras for &dyn TargetIsa {
                 .find(|f| f.name == "has_v")
                 .and_then(|f| f.as_bool())
                 .unwrap_or(false),
-            // The ppc64le backend has no vector lowerings yet.
-            Architecture::Powerpc64le => false,
             _ => true,
         }
     }

@@ -1825,8 +1825,8 @@
         ;; source width, so this is $I32X4 even though the lanes being
         ;; multiplied are halves of $I64X2 lanes.
         (lo Reg (vec_alu_rrr (VecAluOp.MulOddU) xr yr $I32X4))
-        (y_swapped Reg (vec_alu_rrr (VecAluOp.RotlDword) yr c32 $I64X2))
-        (x_swapped Reg (vec_alu_rrr (VecAluOp.RotlDword) xr c32 $I64X2))
+        (y_swapped Reg (vec_alu_rrr (VecAluOp.Rotl) yr c32 $I64X2))
+        (x_swapped Reg (vec_alu_rrr (VecAluOp.Rotl) xr c32 $I64X2))
         (cross_a Reg (vec_alu_rrr (VecAluOp.MulOddU) xr y_swapped $I32X4))
         (cross_b Reg (vec_alu_rrr (VecAluOp.MulOddU) x_swapped yr $I32X4))
         (cross Reg (vec_alu_rrr (VecAluOp.Add) cross_a cross_b $I64X2))
@@ -2002,7 +2002,7 @@
 (rule (lower (fvdemote _ x @ (value_type $F64X2)))
   (let ((converted Reg (vec_cvt (VecCvtOp.F64ToF32) (put_in_reg x)))
         (amt Reg (vec_splat_lane (mov_to_vec (imm $I64 32)) $I64X2))
-        (lowered Reg (vec_alu_rrr (VecAluOp.RotlDword) converted amt $I64X2)))
+        (lowered Reg (vec_alu_rrr (VecAluOp.Rotl) converted amt $I64X2)))
     (output_reg (vec_alu_rrr (VecAluOp.PackMod) (vec_zero) lowered $I64X2))))
 
 ;; `xvcvspdp` reads from big-endian words 0 and 2, which are
@@ -2357,19 +2357,25 @@
 ;; splatting that doubleword fills the register either way -- so the
 ;; mask is right whichever half a 64-bit vector occupies.
 
-(decl vec_mask_from_cond (Value Type) Reg)
-(rule (vec_mask_from_cond c cty)
+(decl vec_mask_from_reg (Reg Type) Reg)
+(rule (vec_mask_from_reg c cty)
   (vec_splat_lane
     (mov_to_vec
       (gen_unary (UnaryOp.Neg)
-                 (cmp_set (int_compare (IntCC.NotEqual)
-                                       (put_in_cmp_reg c (IntCC.NotEqual) cty)
-                                       (imm $I64 0)
-                                       cty))))
+                 (cmp_set (int_compare (IntCC.NotEqual) c (imm $I64 0) cty))))
     $I64X2))
 
 (rule 9 (lower (select (ty_vec_any _) c @ (value_type (fits_in_64 cty)) x y))
-  (output_reg (vec_sel (put_in_reg x) (put_in_reg y) (vec_mask_from_cond c cty))))
+  (output_reg (vec_sel (put_in_reg x) (put_in_reg y)
+                       (vec_mask_from_reg (put_in_cmp_reg c (IntCC.NotEqual) cty)
+                                          cty))))
+
+;; A 128-bit condition is true when either half is non-zero, so the two
+;; are folded together before the mask is built.
+(rule 10 (lower (select (ty_vec_any _) c @ (value_type $I128) x y))
+  (let ((cs ValueRegs (put_in_regs c)))
+    (output_reg (vec_sel (put_in_reg x) (put_in_reg y)
+                         (vec_mask_from_reg (ppc_or (lo cs) (hi cs)) $I64)))))
 
 ;;;; `scalar_to_vector` ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
@@ -2666,3 +2672,93 @@
                                (put_in_reg x)
                                (vec_const (vhigh_bits_ctrl ty))
                                ty))))
+
+;;;; Vector rotates ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; `vrl{b,h,w,d}` rotate each lane by its own amount and mask that
+;; amount to the lane width, which is exactly CLIF's rule -- so the
+;; splatted amount needs no masking, and negating it gives a rotate
+;; right, the negation reducing modulo the width for free.
+
+(rule 3 (lower (rotl (ty_vec128 ty) x y))
+  (output_reg (vec_alu_rrr (VecAluOp.Rotl) (put_in_reg x) (vec_shift_amount y ty) ty)))
+
+(rule 3 (lower (rotr (ty_vec128 ty) x y))
+  (output_reg
+    (vec_alu_rrr (VecAluOp.Rotl) (put_in_reg x)
+                 (vec_alu_rrr (VecAluOp.Sub) (vec_zero) (vec_shift_amount y ty) ty)
+                 ty)))
+
+;;;; Vector `select_spectre_guard` ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; Same as the vector `select` above. The guard's contract is that the
+;; result is not speculated past the condition, which a data-dependent
+;; `xxsel` satisfies exactly as it does for the scalar cases.
+
+(rule 6 (lower (select_spectre_guard (ty_vec_any _)
+                                     c @ (value_type (fits_in_64 cty)) x y))
+  (output_reg (vec_sel (put_in_reg x) (put_in_reg y)
+                       (vec_mask_from_reg (put_in_cmp_reg c (IntCC.NotEqual) cty)
+                                          cty))))
+
+(rule 7 (lower (select_spectre_guard (ty_vec_any _) c @ (value_type $I128) x y))
+  (let ((cs ValueRegs (put_in_regs c)))
+    (output_reg (vec_sel (put_in_reg x) (put_in_reg y)
+                         (vec_mask_from_reg (ppc_or (lo cs) (hi cs)) $I64)))))
+
+;;;; Extending 64-bit vector loads ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; Load eight bytes and widen each lane to twice its width. The value
+;; arrives in big-endian doubleword 0 -- the same placement the 64-bit
+;; vector types use -- which is exactly where the *High* unpack and
+;; merge forms read from, so these are the 64-bit widening rules with a
+;; load in front and no permute anywhere.
+
+(decl vec64_load (Value i32 MemFlagsData) Reg)
+(rule (vec64_load addr offset flags)
+  (vec64_from_gpr (gen_load $I64 (amode addr offset) flags)))
+
+(rule (lower (uload8x8 _ (little_or_native_endian flags) addr offset))
+  (output_reg (vec_alu_rrr (VecAluOp.MergeHigh) (vec_zero)
+                           (vec64_load addr offset flags) $I8X16)))
+(rule (lower (uload16x4 _ (little_or_native_endian flags) addr offset))
+  (output_reg (vec_alu_rrr (VecAluOp.MergeHigh) (vec_zero)
+                           (vec64_load addr offset flags) $I16X8)))
+(rule (lower (uload32x2 _ (little_or_native_endian flags) addr offset))
+  (output_reg (vec_alu_rrr (VecAluOp.MergeHigh) (vec_zero)
+                           (vec64_load addr offset flags) $I32X4)))
+
+(rule (lower (sload8x8 _ (little_or_native_endian flags) addr offset))
+  (output_reg (vec_unary (VecUnaryOp.WidenSHigh)
+                         (vec64_load addr offset flags) $I8X16)))
+(rule (lower (sload16x4 _ (little_or_native_endian flags) addr offset))
+  (output_reg (vec_unary (VecUnaryOp.WidenSHigh)
+                         (vec64_load addr offset flags) $I16X8)))
+(rule (lower (sload32x2 _ (little_or_native_endian flags) addr offset))
+  (output_reg (vec_unary (VecUnaryOp.WidenSHigh)
+                         (vec64_load addr offset flags) $I32X4)))
+
+;; The float `select_spectre_guard`, which mirrors the float `select`:
+;; the guard's contract is that the result is not speculated past the
+;; condition, and the data-dependent conditional move satisfies it.
+(rule 8 (lower (select_spectre_guard (ty_scalar_float ty)
+                                     c @ (value_type (fits_in_64 cty)) x y))
+  (output_reg
+    (gen_fpu_select (int_compare (IntCC.NotEqual)
+                                 (put_in_cmp_reg c (IntCC.NotEqual) cty)
+                                 (imm $I64 0)
+                                 cty)
+                    (put_in_reg x)
+                    (put_in_reg y)
+                    ty)))
+
+(rule 9 (lower (select_spectre_guard (ty_scalar_float ty) c @ (value_type $I128) x y))
+  (let ((cs ValueRegs (put_in_regs c)))
+    (output_reg
+      (gen_fpu_select (int_compare (IntCC.NotEqual)
+                                   (ppc_or (lo cs) (hi cs))
+                                   (imm $I64 0)
+                                   $I64)
+                      (put_in_reg x)
+                      (put_in_reg y)
+                      ty))))
