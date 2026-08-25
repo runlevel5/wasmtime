@@ -2,7 +2,7 @@
 
 use crate::binemit::{Addend, CodeOffset, Reloc};
 pub use crate::ir::condcodes::{FloatCC, IntCC};
-use crate::ir::types::{F32, F64, I8, I8X16, I16, I32, I64, I128};
+use crate::ir::types::{F16, F32, F64, F128, I8, I8X16, I16, I32, I64, I128};
 pub use crate::ir::{MemFlagsData, Type};
 use crate::isa::FunctionAlignment;
 use crate::machinst::*;
@@ -597,6 +597,17 @@ impl MachInst for Inst {
             // that run out of floating-point argument registers.
             F32 => Ok((&[RegClass::Float], &[F64])),
             F64 => Ok((&[RegClass::Float], core::slice::from_ref(ty))),
+            // A vector of `f16` or `f128` lanes is rejected before the
+            // width checks below. Those accept a vector by its total
+            // width, which `f16x8` and `f16x4` satisfy -- but the ISA
+            // has no half- or quad-precision lane arithmetic, and the
+            // lane-width dispatch in the float emitter would silently
+            // treat such a vector as one of doubles.
+            _ if ty.is_vector() && (ty.lane_of() == F16 || ty.lane_of() == F128) => {
+                Err(CodegenError::Unsupported(alloc::format!(
+                    "type not yet supported by the ppc64 backend: {ty}"
+                )))
+            }
             _ if ty.is_vector() && ty.bits() == 128 => {
                 Ok((&[RegClass::Vector], core::slice::from_ref(ty)))
             }
