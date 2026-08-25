@@ -1317,6 +1317,50 @@ backend lowers.
 
 Phase 5 SIMD is now complete for the v128 grid, with fuzz coverage.
 
+#### Vector type coverage, and an f16 miscompilation (2026-08-25)
+
+Auditing *which vector types the backend accepts* — as opposed to which
+operations — turned up a silent miscompilation.
+
+`rc_for_type` accepted a vector by its **total width**, so `f16x8` (128
+bits) and `f16x4` (64 bits) passed. Nothing downstream re-checks the
+lane type, and `vec_fpu_rrr` picks single- or double-precision by asking
+whether lanes are 32 bits wide, defaulting to double otherwise. So
+`fadd.f16x8` emitted **`xvadddp`** — a double-precision add over two
+64-bit lanes — for a value that is eight half-precision numbers. Wrong
+format, wrong lane count, no diagnostic.
+
+Nothing was generating these: fuzzgen's type pool has no f16 vectors,
+and wasm has no f16 at all. The bug was reachable only by a Cranelift
+frontend that uses them, which is precisely the kind of gap that a
+wasm-shaped test suite cannot find.
+
+Fixed in `rc_for_type` — the one place that sees every value regardless
+of which rule lowers it. `simd-vconst-f16.clif`, enabled by the parity
+sweep, had passed only because `vconst` is pure bit movement that never
+consults the lane type; it is disabled with the other f16 tests, since
+"constructible and copyable but miscompiles on contact with arithmetic"
+is worse than unsupported.
+
+**Where vector type support now stands** (CLIF vector widths are 16 to
+512 bits):
+
+| Width | Types | Status |
+|---|---|---|
+| 16-bit | `i8x2` | not supported |
+| 32-bit | `i8x4`, `i16x2` | not supported |
+| **64-bit** | `i8x8`, `i16x4`, `i32x2`, `f32x2` | **supported** (batch 15) |
+| **128-bit** | `i8x16`, `i16x8`, `i32x4`, `i64x2`, `f32x4`, `f64x2` | **supported** |
+| 256/512-bit | `i8x32`, `i32x8`, `f64x4`, … | not supported |
+| any width | `f16xN`, `f128xN` | not supported (see above) |
+| dynamic | `i8x16xN`, … | not supported |
+
+The 128-bit row is the whole of wasm SIMD, and the 64-bit row is what
+aarch64 parity required. Everything else fails with a clean
+`Unsupported` error rather than miscompiling — the 256- and 512-bit
+types would need multi-register values, and the dynamic types a whole
+scaling mechanism, neither of which any current consumer wants.
+
 ### Phase 6 — Tuning
 
 POWER9/10 fast paths (`isel`, `setb`, mod instructions, P10 pcrel to kill
