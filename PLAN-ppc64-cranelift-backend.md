@@ -1361,6 +1361,78 @@ aarch64 parity required. Everything else fails with a clean
 types would need multi-register values, and the dynamic types a whole
 scaling mechanism, neither of which any current consumer wants.
 
+#### Batches 18-20 (2026-08-25): completing 64/128-bit, and a bug sweep
+
+A deliberate hunt for latent bugs and missing lowerings across both
+supported vector widths, rather than following upstream tests. It found
+**three real defects** and closed the 64-bit grid.
+
+**The sweep had a blind spot that mattered.** Batch 17's exhaustive
+enumeration used *fuzzgen's* type pool, which is 128-bit only — so the
+64-bit types were never swept at all, and batch 15 had implemented only
+what the upstream tests happened to need. Re-running over every
+(opcode, control type, argument type) combination across both widths
+found **87 shape-valid pairs that did not compile**. Lesson: an
+"exhaustive" sweep is only exhaustive over the set you enumerated;
+state that set explicitly.
+
+Most were type guards, not missing work: 35 lane-wise rules (shifts,
+rotates, min/max, saturating, `popcnt`, `iabs`, `bitselect`, `icmp`,
+float lane arithmetic) now take either width, since the instruction
+works on whole registers and cares only about lane width. The rest had
+to know the data sits in big-endian doubleword 0:
+
+- `imul.i8x8` reuses the 128-bit interleave unchanged.
+- `smulhi`/`umulhi` narrow need **one merge fewer** than at 128 bits:
+  only four products exist, all in the high big-endian elements, so a
+  single high merge interleaves them and fills all eight lanes.
+- The narrowings gather both operands into one register before packing
+  (`y` above `x`), because the pack fills doubleword 0 from its first
+  operand's eight lanes and each source supplies only four.
+- `extractlane`/`insertlane` restate the index as `lane + n`, which
+  makes the 128-bit path's own big-endian subtraction land on the right
+  element — reusing the arithmetic instead of duplicating it.
+
+**Defect 1 (miscompilation): `f16` vector lanes.** Covered in the entry
+above; `rc_for_type` accepted vectors by total width, so `fadd.f16x8`
+became `xvadddp`. Also hardened the four float emitters that chose
+precision by `lane_bits() == 32` with a silent default to double — that
+default *was* the bug. The enumerated dispatches already used
+`unreachable!`, which is the pattern to prefer.
+
+**Defect 2 (missing lowering): lane access on 64-bit vectors** — and it
+had been **passing locally**. With host and target different, `test run`
+skips compilation entirely, so the file was only ever interpreted. It
+failed the instant the same file ran on the POWER9. This is the second
+time this trap has cost time (see batch 15); for anything type-related
+the hardware run is the *first* real check.
+
+**Defect 3 (miscompilation, earlier): narrow `smulhi`/`umulhi`** — see
+the parity-sweep entry. Same shape as defect 1: a value reaching an
+emitter whose type dispatch could not represent it.
+
+**The common thread across all three**: a lowering rule whose type guard
+is *looser* than the emitter it feeds. Worth checking guard and emitter
+together whenever either changes.
+
+**Differential testing** now covers the lowerings whose derivation is
+non-obvious and which no upstream runtest reaches here: every lane of
+every integer vector type both directions (88 cases), `avg_round.i64x2`
+at the point where `a + b + 1` overflows a doubleword (the whole reason
+that lowering uses `(a|b) - ((a^b)>>1)`), `iadd_pairwise`, the
+widenings from `i32x4`, `imul` on `i64x2`/`i8x16`, `smulhi`/`umulhi` at
+every width, and the narrowings. Expectations are computed from CLIF's
+semantics independently of the lowering, so the interpreter validates
+the expectations and the POWER9 validates the code against them — the
+oracle is never the thing under test.
+
+**State: the 64-bit and 128-bit grids are complete.** Every shape-valid
+combination compiles except what the hardware genuinely lacks
+(doubleword saturating arithmetic, doubleword high-half multiply before
+POWER10, word-wide rounding multiply — each verified to compile on
+aarch64, so each a real ISA difference), and the 128-bit
+division/remainder/high-multiply/float conversions no backend lowers.
+
 ### Phase 6 — Tuning
 
 POWER9/10 fast paths (`isel`, `setb`, mod instructions, P10 pcrel to kill
