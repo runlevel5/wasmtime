@@ -1261,6 +1261,62 @@ one) and 11 needing one of four declared type gaps: **f16**, **f128**,
 **dynamic vector types**, and **sub-64-bit vectors** (`i8x2`, `i16x2`).
 There are no remaining *operation* gaps against aarch64.
 
+#### Batch 17 (2026-08-25): fuzzing enabled, and what it found
+
+`supports_simd` is now `true` for this target and the exclusion list has
+been rewritten; it had been written when there were no vector lowerings
+at all and was almost entirely stale.
+
+**The list is a correctness requirement, not a yield knob.**
+`cranelift-fuzzgen` calls `compile().unwrap()`, so any operation fuzzgen
+can generate but the backend cannot lower is a *panic* — an exclusion
+list that is merely approximately right produces a fuzz target that
+reports spurious crashes forever.
+
+So rather than reason from the rules, every (opcode, control type,
+argument type) combination fuzzgen's own `OPCODE_SIGNATURES` table can
+produce was enumerated and compiled — **1076 of them** — and each
+failure then compiled for **aarch64** to distinguish a real gap from a
+combination fuzzgen filters globally (`valid_for_target`'s opening
+section rejects a lot: mismatched conversion shapes, unequal-width
+bitcasts, `StackSwitch`). That comparison is what makes the result
+trustworthy; without it, `blendv`, `x86_cvtt2dq` and `bitselect.f32`
+look like ppc64 gaps when in fact no backend takes them.
+
+**A methodological miss worth recording.** The first pass skipped
+opcodes with *free* argument types, which quietly excluded the entire
+shift and rotate family — the amount type is free. A dumb loop over
+fuzzgen internals then hit `rotl.i16x8` on its very first productive
+iteration. Enumerating the cartesian product over free positions, not
+just the bound ones, is what a complete sweep requires.
+
+Four operations aarch64 supports were missing, and all four were
+**implemented rather than excluded**:
+
+- **Vector `rotl`/`rotr` at every lane width.** `vrl{b,h,w,d}` mask the
+  amount to the lane width, which is CLIF's rule exactly, so no masking
+  is needed and negation gives rotate-right for free. The
+  doubleword-only rotate already present for the i64x2 multiply
+  generalized to all four widths — including deleting an
+  `assert_eq!(lane, 64)` that had pinned it there.
+- **The extending 64-bit vector loads** (`{u,s}load{8x8,16x4,32x2}`).
+  The loaded doubleword lands in big-endian doubleword 0, exactly where
+  the *High* unpack and merge forms read from, so these are batch 15's
+  widening rules with a load in front and no permute at all.
+- **`select_spectre_guard` on vectors and scalar floats**, mirroring the
+  `select` rules.
+- **`select` on a vector with a 128-bit condition**, folding the halves
+  together before building the mask.
+
+What stays excluded is what the hardware genuinely lacks — doubleword
+saturating arithmetic, doubleword high-half multiply before POWER10, the
+word-wide rounding multiply — **each individually verified to compile on
+aarch64**, so each is a real ISA difference rather than an oversight,
+plus the 128-bit division/remainder/high-multiply/float conversions no
+backend lowers.
+
+Phase 5 SIMD is now complete for the v128 grid, with fuzz coverage.
+
 ### Phase 6 — Tuning
 
 POWER9/10 fast paths (`isel`, `setb`, mod instructions, P10 pcrel to kill
