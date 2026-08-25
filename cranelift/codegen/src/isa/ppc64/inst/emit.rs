@@ -1865,6 +1865,14 @@ impl MachInstEmit for Inst {
             }
 
             &Inst::VecRound { rd, rn, mode, ty } => {
+                // Only single and double lanes exist in VSX. Asserting
+                // here rather than letting `== 32` fall through to the
+                // double-precision form keeps a lane width this code
+                // cannot encode from being silently mis-emitted.
+                debug_assert!(
+                    matches!(ty.lane_bits(), 32 | 64),
+                    "no vector float arithmetic for {ty}"
+                );
                 let single = ty.lane_bits() == 32;
                 let xo = match (mode, single) {
                     (FpuRoundMode::Ceil, true) => 169,
@@ -1920,6 +1928,14 @@ impl MachInstEmit for Inst {
                 // `xvmadda{sp,dp}`: XT = XA * XB + XT. `rc` is not
                 // encoded -- the register allocator has already made
                 // `rd` and `rc` the same register.
+                // Only single and double lanes exist in VSX. Asserting
+                // here rather than letting `== 32` fall through to the
+                // double-precision form keeps a lane width this code
+                // cannot encode from being silently mis-emitted.
+                debug_assert!(
+                    matches!(ty.lane_bits(), 32 | 64),
+                    "no vector float arithmetic for {ty}"
+                );
                 let xo = if ty.lane_bits() == 32 { 65 } else { 97 };
                 sink.put4(enc_xx3(
                     vsr_num(rd.to_reg()),
@@ -1930,6 +1946,14 @@ impl MachInstEmit for Inst {
             }
 
             &Inst::VecFpuRRR { op, rd, ra, rb, ty } => {
+                // Only single and double lanes exist in VSX. Asserting
+                // here rather than letting `== 32` fall through to the
+                // double-precision form keeps a lane width this code
+                // cannot encode from being silently mis-emitted.
+                debug_assert!(
+                    matches!(ty.lane_bits(), 32 | 64),
+                    "no vector float arithmetic for {ty}"
+                );
                 let single = ty.lane_bits() == 32;
                 let xo = match (op, single) {
                     (VecFpuOp2::Add, true) => 64,
@@ -1962,6 +1986,14 @@ impl MachInstEmit for Inst {
             }
 
             &Inst::VecFpuRR { op, rd, rn, ty } => {
+                // Only single and double lanes exist in VSX. Asserting
+                // here rather than letting `== 32` fall through to the
+                // double-precision form keeps a lane width this code
+                // cannot encode from being silently mis-emitted.
+                debug_assert!(
+                    matches!(ty.lane_bits(), 32 | 64),
+                    "no vector float arithmetic for {ty}"
+                );
                 let single = ty.lane_bits() == 32;
                 let xo = match (op, single) {
                     (VecFpuOp1::Sqrt, true) => 139,

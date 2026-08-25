@@ -1,0 +1,140 @@
+test interpret
+test run
+target powerpc64le
+target powerpc64le has_isa_3_0
+
+;; Completion of the 64-bit vector grid. Every expectation below is
+;; computed from CLIF's semantics independently of the lowering, so
+;; the interpreter checks the expectations and the POWER9 checks the
+;; generated code against them.
+;;
+;; The inputs are deliberately asymmetric across lanes: these
+;; lowerings move data between register halves, and symmetric data
+;; would hide a swapped half.
+
+function %imul_i8x8(i8x8, i8x8) -> i8x8 {
+block0(v0: i8x8, v1: i8x8):
+    v2 = imul.i8x8 v0, v1
+    return v2
+}
+; run: %imul_i8x8([3 -4 5 -6 7 -8 9 127], [7 9 -11 13 -15 17 -19 3]) == [21 -36 -55 -78 -105 120 85 125]
+
+function %smulhi_i8x8(i8x8, i8x8) -> i8x8 {
+block0(v0: i8x8, v1: i8x8):
+    v2 = smulhi.i8x8 v0, v1
+    return v2
+}
+; run: %smulhi_i8x8([3 -4 5 -6 7 -8 9 127], [7 9 -11 13 -15 17 -19 3]) == [0 -1 -1 -1 -1 -1 -1 1]
+
+function %umulhi_i8x8(i8x8, i8x8) -> i8x8 {
+block0(v0: i8x8, v1: i8x8):
+    v2 = umulhi.i8x8 v0, v1
+    return v2
+}
+; run: %umulhi_i8x8([-56 3 -1 17 64 -127 7 -6], [3 -56 -1 19 4 -126 9 -5]) == [2 2 -2 1 1 65 0 -11]
+
+function %smulhi_i16x4(i16x4, i16x4) -> i16x4 {
+block0(v0: i16x4, v1: i16x4):
+    v2 = smulhi.i16x4 v0, v1
+    return v2
+}
+; run: %smulhi_i16x4([300 -400 500 -32768], [700 900 -1100 3]) == [3 -6 -9 -2]
+
+function %umulhi_i16x4(i16x4, i16x4) -> i16x4 {
+block0(v0: i16x4, v1: i16x4):
+    v2 = umulhi.i16x4 v0, v1
+    return v2
+}
+; run: %umulhi_i16x4([-5536 3 -1 4096], [3 -5536 -1 17]) == [2 2 -2 1]
+
+function %smulhi_i32x2(i32x2, i32x2) -> i32x2 {
+block0(v0: i32x2, v1: i32x2):
+    v2 = smulhi.i32x2 v0, v1
+    return v2
+}
+; run: %smulhi_i32x2([100000 -200000], [300000 -70000]) == [6 3]
+
+function %umulhi_i32x2(i32x2, i32x2) -> i32x2 {
+block0(v0: i32x2, v1: i32x2):
+    v2 = umulhi.i32x2 v0, v1
+    return v2
+}
+; run: %umulhi_i32x2([-294967296 123456], [3 -294967296]) == [2 114977]
+
+function %snarrow_i16x4(i16x4, i16x4) -> i8x8 {
+block0(v0: i16x4, v1: i16x4):
+    v2 = snarrow.i16x4 v0, v1
+    return v2
+}
+; run: %snarrow_i16x4([300 -400 70 -8], [5 -6000 32767 -32768]) == [127 -128 70 -8 5 -128 127 -128]
+
+function %unarrow_i16x4(i16x4, i16x4) -> i8x8 {
+block0(v0: i16x4, v1: i16x4):
+    v2 = unarrow.i16x4 v0, v1
+    return v2
+}
+; run: %unarrow_i16x4([300 -400 70 -8], [5 -6000 32767 -32768]) == [-1 0 70 0 5 0 -1 0]
+
+function %uunarrow_i16x4(i16x4, i16x4) -> i8x8 {
+block0(v0: i16x4, v1: i16x4):
+    v2 = uunarrow.i16x4 v0, v1
+    return v2
+}
+; run: %uunarrow_i16x4([300 400 70 8], [5 6000 -1 1]) == [-1 -1 70 8 5 -1 -1 1]
+
+function %snarrow_i32x2(i32x2, i32x2) -> i16x4 {
+block0(v0: i32x2, v1: i32x2):
+    v2 = snarrow.i32x2 v0, v1
+    return v2
+}
+; run: %snarrow_i32x2([100000 -200000], [7 -8]) == [32767 -32768 7 -8]
+
+function %sqmul_i16x4(i16x4, i16x4) -> i16x4 {
+block0(v0: i16x4, v1: i16x4):
+    v2 = sqmul_round_sat.i16x4 v0, v1
+    return v2
+}
+; run: %sqmul_i16x4([16384 -16384 32767 -32768], [16384 16384 32767 32767]) == [8192 -8192 32766 -32767]
+
+function %smin_i16x4(i16x4, i16x4) -> i16x4 {
+block0(v0: i16x4, v1: i16x4):
+    v2 = smin.i16x4 v0, v1
+    return v2
+}
+; run: %smin_i16x4([300 -400 500 -32768], [700 900 -1100 3]) == [300 -400 -1100 -32768]
+
+function %umax_i8x8(i8x8, i8x8) -> i8x8 {
+block0(v0: i8x8, v1: i8x8):
+    v2 = umax.i8x8 v0, v1
+    return v2
+}
+; run: %umax_i8x8([-56 3 -1 17 64 -127 7 -6], [3 -56 -1 19 4 -126 9 -5]) == [-56 -56 -1 19 64 -126 9 -5]
+
+function %sadd_sat_i8x8(i8x8, i8x8) -> i8x8 {
+block0(v0: i8x8, v1: i8x8):
+    v2 = sadd_sat.i8x8 v0, v1
+    return v2
+}
+; run: %sadd_sat_i8x8([3 -4 5 -6 7 -8 9 127], [7 9 -11 13 -15 17 -19 3]) == [10 5 -6 7 -8 9 -10 127]
+
+function %usub_sat_i8x8(i8x8, i8x8) -> i8x8 {
+block0(v0: i8x8, v1: i8x8):
+    v2 = usub_sat.i8x8 v0, v1
+    return v2
+}
+; run: %usub_sat_i8x8([-56 3 -1 17 64 -127 7 -6], [3 -56 -1 19 4 -126 9 -5]) == [-59 0 0 0 60 0 0 0]
+
+function %iabs_i16x4(i16x4) -> i16x4 {
+block0(v0: i16x4):
+    v1 = iabs.i16x4 v0
+    return v1
+}
+; run: %iabs_i16x4([-3 4 -32768 7]) == [3 4 -32768 7]
+
+function %popcnt_i8x8(i8x8) -> i8x8 {
+block0(v0: i8x8):
+    v1 = popcnt.i8x8 v0
+    return v1
+}
+; run: %popcnt_i8x8([-56 3 -1 17 64 -127 7 -6]) == [3 2 8 2 1 2 3 6]
+

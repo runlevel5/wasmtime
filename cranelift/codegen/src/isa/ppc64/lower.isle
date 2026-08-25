@@ -1497,50 +1497,50 @@
 ;; the other six conditions come from swapping the operands (turning
 ;; `>` into `<`) and complementing the mask (turning `<` into `>=`).
 
-(rule 3 (lower (icmp (ty_vec128 ty) (IntCC.Equal) x y))
+(rule 3 (lower (icmp (ty_vec_any ty) (IntCC.Equal) x y))
   (output_reg (vec_alu_rrr (VecAluOp.CmpEq) (put_in_reg x) (put_in_reg y) ty)))
 
-(rule 3 (lower (icmp (ty_vec128 ty) (IntCC.NotEqual) x y))
+(rule 3 (lower (icmp (ty_vec_any ty) (IntCC.NotEqual) x y))
   (output_reg
     (vec_not (vec_alu_rrr (VecAluOp.CmpEq) (put_in_reg x) (put_in_reg y) ty) ty)))
 
-(rule 3 (lower (icmp (ty_vec128 ty) (IntCC.SignedGreaterThan) x y))
+(rule 3 (lower (icmp (ty_vec_any ty) (IntCC.SignedGreaterThan) x y))
   (output_reg (vec_alu_rrr (VecAluOp.CmpGtS) (put_in_reg x) (put_in_reg y) ty)))
 
-(rule 3 (lower (icmp (ty_vec128 ty) (IntCC.SignedLessThan) x y))
+(rule 3 (lower (icmp (ty_vec_any ty) (IntCC.SignedLessThan) x y))
   (output_reg (vec_alu_rrr (VecAluOp.CmpGtS) (put_in_reg y) (put_in_reg x) ty)))
 
-(rule 3 (lower (icmp (ty_vec128 ty) (IntCC.SignedGreaterThanOrEqual) x y))
+(rule 3 (lower (icmp (ty_vec_any ty) (IntCC.SignedGreaterThanOrEqual) x y))
   (output_reg
     (vec_not (vec_alu_rrr (VecAluOp.CmpGtS) (put_in_reg y) (put_in_reg x) ty) ty)))
 
-(rule 3 (lower (icmp (ty_vec128 ty) (IntCC.SignedLessThanOrEqual) x y))
+(rule 3 (lower (icmp (ty_vec_any ty) (IntCC.SignedLessThanOrEqual) x y))
   (output_reg
     (vec_not (vec_alu_rrr (VecAluOp.CmpGtS) (put_in_reg x) (put_in_reg y) ty) ty)))
 
-(rule 3 (lower (icmp (ty_vec128 ty) (IntCC.UnsignedGreaterThan) x y))
+(rule 3 (lower (icmp (ty_vec_any ty) (IntCC.UnsignedGreaterThan) x y))
   (output_reg (vec_alu_rrr (VecAluOp.CmpGtU) (put_in_reg x) (put_in_reg y) ty)))
 
-(rule 3 (lower (icmp (ty_vec128 ty) (IntCC.UnsignedLessThan) x y))
+(rule 3 (lower (icmp (ty_vec_any ty) (IntCC.UnsignedLessThan) x y))
   (output_reg (vec_alu_rrr (VecAluOp.CmpGtU) (put_in_reg y) (put_in_reg x) ty)))
 
-(rule 3 (lower (icmp (ty_vec128 ty) (IntCC.UnsignedGreaterThanOrEqual) x y))
+(rule 3 (lower (icmp (ty_vec_any ty) (IntCC.UnsignedGreaterThanOrEqual) x y))
   (output_reg
     (vec_not (vec_alu_rrr (VecAluOp.CmpGtU) (put_in_reg y) (put_in_reg x) ty) ty)))
 
-(rule 3 (lower (icmp (ty_vec128 ty) (IntCC.UnsignedLessThanOrEqual) x y))
+(rule 3 (lower (icmp (ty_vec_any ty) (IntCC.UnsignedLessThanOrEqual) x y))
   (output_reg
     (vec_not (vec_alu_rrr (VecAluOp.CmpGtU) (put_in_reg x) (put_in_reg y) ty) ty)))
 
 ;;;; Vector integer min/max ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(rule 2 (lower (smin (ty_vec128 ty) x y))
+(rule 2 (lower (smin (ty_vec_any ty) x y))
   (output_reg (vec_alu_rrr (VecAluOp.MinS) (put_in_reg x) (put_in_reg y) ty)))
-(rule 2 (lower (umin (ty_vec128 ty) x y))
+(rule 2 (lower (umin (ty_vec_any ty) x y))
   (output_reg (vec_alu_rrr (VecAluOp.MinU) (put_in_reg x) (put_in_reg y) ty)))
-(rule 2 (lower (smax (ty_vec128 ty) x y))
+(rule 2 (lower (smax (ty_vec_any ty) x y))
   (output_reg (vec_alu_rrr (VecAluOp.MaxS) (put_in_reg x) (put_in_reg y) ty)))
-(rule 2 (lower (umax (ty_vec128 ty) x y))
+(rule 2 (lower (umax (ty_vec_any ty) x y))
   (output_reg (vec_alu_rrr (VecAluOp.MaxU) (put_in_reg x) (put_in_reg y) ty)))
 
 ;;;; Vector shifts ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1549,13 +1549,13 @@
 ;; wants it per lane, so it is splatted first. No masking: the hardware
 ;; already uses only the low log2(lane width) bits of each element.
 
-(rule 6 (lower (ishl (ty_vec128 ty) x y))
+(rule 6 (lower (ishl (ty_vec_any ty) x y))
   (output_reg (vec_alu_rrr (VecAluOp.Shl) (put_in_reg x) (vec_shift_amount y ty) ty)))
 
-(rule 6 (lower (ushr (ty_vec128 ty) x y))
+(rule 6 (lower (ushr (ty_vec_any ty) x y))
   (output_reg (vec_alu_rrr (VecAluOp.ShrU) (put_in_reg x) (vec_shift_amount y ty) ty)))
 
-(rule 6 (lower (sshr (ty_vec128 ty) x y))
+(rule 6 (lower (sshr (ty_vec_any ty) x y))
   (output_reg (vec_alu_rrr (VecAluOp.ShrS) (put_in_reg x) (vec_shift_amount y ty) ty)))
 
 ;;;; Floating-point lane arithmetic ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1569,11 +1569,11 @@
 (rule 2 (lower (fdiv (ty_vec_any ty) x y))
   (output_reg (vec_fpu_rrr (VecFpuOp2.Div) (put_in_reg x) (put_in_reg y) ty)))
 
-(rule 2 (lower (sqrt (ty_vec128 ty) x))
+(rule 2 (lower (sqrt (ty_vec_any ty) x))
   (output_reg (vec_fpu_rr (VecFpuOp1.Sqrt) (put_in_reg x) ty)))
-(rule 2 (lower (fneg (ty_vec128 ty) x))
+(rule 2 (lower (fneg (ty_vec_any ty) x))
   (output_reg (vec_fpu_rr (VecFpuOp1.Neg) (put_in_reg x) ty)))
-(rule 2 (lower (fabs (ty_vec128 ty) x))
+(rule 2 (lower (fabs (ty_vec_any ty) x))
   (output_reg (vec_fpu_rr (VecFpuOp1.Abs) (put_in_reg x) ty)))
 
 ;;;; Vector floating-point comparisons ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1663,7 +1663,7 @@
 ;; for the most negative lane value for free, since negating it yields
 ;; itself and the maximum is then also itself.
 
-(rule 2 (lower (iabs (ty_vec128 ty) x))
+(rule 2 (lower (iabs (ty_vec_any ty) x))
   (let ((xr Reg (put_in_reg x))
         (neg Reg (vec_alu_rrr (VecAluOp.Sub) (vec_zero) xr ty)))
     (output_reg (vec_alu_rrr (VecAluOp.MaxS) xr neg ty))))
@@ -1706,34 +1706,34 @@
   (output_reg (vec_insert_lane (put_in_reg x) (put_in_reg y) ty lane)))
 
 ;; Vector bitselect is a single `xxsel`.
-(rule 2 (lower (bitselect (ty_vec128 _) mask x y))
+(rule 2 (lower (bitselect (ty_vec_any _) mask x y))
   (output_reg (vec_sel (put_in_reg x) (put_in_reg y) (put_in_reg mask))))
 
 ;;;; Vector saturating arithmetic, popcnt and rounding ;;;;;;;;;;;;;;;;;;;;;;;
 
-(rule (lower (sadd_sat (ty_vec128 ty) x y))
+(rule (lower (sadd_sat (ty_vec_any ty) x y))
   (if-let true (vec_lanes_under_64 ty))
   (output_reg (vec_alu_rrr (VecAluOp.SAddSat) (put_in_reg x) (put_in_reg y) ty)))
-(rule (lower (uadd_sat (ty_vec128 ty) x y))
+(rule (lower (uadd_sat (ty_vec_any ty) x y))
   (if-let true (vec_lanes_under_64 ty))
   (output_reg (vec_alu_rrr (VecAluOp.UAddSat) (put_in_reg x) (put_in_reg y) ty)))
-(rule (lower (ssub_sat (ty_vec128 ty) x y))
+(rule (lower (ssub_sat (ty_vec_any ty) x y))
   (if-let true (vec_lanes_under_64 ty))
   (output_reg (vec_alu_rrr (VecAluOp.SSubSat) (put_in_reg x) (put_in_reg y) ty)))
-(rule (lower (usub_sat (ty_vec128 ty) x y))
+(rule (lower (usub_sat (ty_vec_any ty) x y))
   (if-let true (vec_lanes_under_64 ty))
   (output_reg (vec_alu_rrr (VecAluOp.USubSat) (put_in_reg x) (put_in_reg y) ty)))
 
-(rule 3 (lower (popcnt (ty_vec128 ty) x))
+(rule 3 (lower (popcnt (ty_vec_any ty) x))
   (output_reg (vec_unary (VecUnaryOp.Popcnt) (put_in_reg x) ty)))
 
-(rule 2 (lower (ceil (ty_vec128 ty) x))
+(rule 2 (lower (ceil (ty_vec_any ty) x))
   (output_reg (vec_round (FpuRoundMode.Ceil) (put_in_reg x) ty)))
-(rule 2 (lower (floor (ty_vec128 ty) x))
+(rule 2 (lower (floor (ty_vec_any ty) x))
   (output_reg (vec_round (FpuRoundMode.Floor) (put_in_reg x) ty)))
-(rule 2 (lower (trunc (ty_vec128 ty) x))
+(rule 2 (lower (trunc (ty_vec_any ty) x))
   (output_reg (vec_round (FpuRoundMode.Trunc) (put_in_reg x) ty)))
-(rule 2 (lower (nearest (ty_vec128 ty) x))
+(rule 2 (lower (nearest (ty_vec_any ty) x))
   (output_reg (vec_round (FpuRoundMode.Nearest) (put_in_reg x) ty)))
 
 ;;;; Vector widening and narrowing ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -2092,10 +2092,10 @@
         (ordered Reg (vec_alu_rrr (VecAluOp.And) a_ordered b_ordered ty)))
     (vec_sel picked propagated ordered)))
 
-(rule 1 (lower (fmin (ty_vec128 ty) x y))
+(rule 1 (lower (fmin (ty_vec_any ty) x y))
   (output_reg (vec_min_max (VecFpuOp2.Min) x y ty)))
 
-(rule 1 (lower (fmax (ty_vec128 ty) x y))
+(rule 1 (lower (fmax (ty_vec_any ty) x y))
   (output_reg (vec_min_max (VecFpuOp2.Max) x y ty)))
 
 ;;;; Vector `fcopysign` and `fma` ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -2680,10 +2680,10 @@
 ;; splatted amount needs no masking, and negating it gives a rotate
 ;; right, the negation reducing modulo the width for free.
 
-(rule 3 (lower (rotl (ty_vec128 ty) x y))
+(rule 3 (lower (rotl (ty_vec_any ty) x y))
   (output_reg (vec_alu_rrr (VecAluOp.Rotl) (put_in_reg x) (vec_shift_amount y ty) ty)))
 
-(rule 3 (lower (rotr (ty_vec128 ty) x y))
+(rule 3 (lower (rotr (ty_vec_any ty) x y))
   (output_reg
     (vec_alu_rrr (VecAluOp.Rotl) (put_in_reg x)
                  (vec_alu_rrr (VecAluOp.Sub) (vec_zero) (vec_shift_amount y ty) ty)
@@ -2762,3 +2762,114 @@
                       (put_in_reg x)
                       (put_in_reg y)
                       ty))))
+
+;;;; Completing the 64-bit vector grid ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; The lane-wise operations above accept either register width already,
+;; because the instruction does not care where in the register the lanes
+;; sit. What is left are the operations that *do* care: those that
+;; combine two operands' lanes into one register, or that read only one
+;; half of a product. For a 64-bit vector the data lives in big-endian
+;; doubleword 0, so each of these has to put its result back there.
+
+;; The word conversions read and write word lanes in place, so the two
+;; meaningful lanes stay in big-endian words 0 and 1 throughout.
+;; ISLE has no `$F32X2` constant, so the float side is matched
+;; structurally; `f32x2` is the only 64-bit float vector this backend
+;; accepts, `f16x4` having been rejected in `rc_for_type`.
+(rule 3 (lower (fcvt_to_sint_sat $I32X2 x @ (value_type (ty_vec64 _))))
+  (output_reg (fcvt_to_sint_sat_masked (VecCvtOp.F32ToI32S) (VecFpuOp2.CmpEq)
+                                       x $F32X4)))
+(rule 3 (lower (fcvt_to_uint_sat $I32X2 x @ (value_type (ty_vec64 _))))
+  (output_reg (vec_cvt (VecCvtOp.F32ToI32U) (put_in_reg x))))
+(rule 3 (lower (fcvt_from_sint (ty_vec64 _) x @ (value_type $I32X2)))
+  (output_reg (vec_cvt (VecCvtOp.I32ToF32S) (put_in_reg x))))
+(rule 3 (lower (fcvt_from_uint (ty_vec64 _) x @ (value_type $I32X2)))
+  (output_reg (vec_cvt (VecCvtOp.I32ToF32U) (put_in_reg x))))
+
+;; Per-lane, and the addend is zero, so this is width-blind.
+(rule 1 (lower (sqmul_round_sat $I16X4 x y))
+  (output_reg (vec_alu_rrrr (VecAluOp4.MulHiRoundAddSHS)
+                            (put_in_reg x) (put_in_reg y) (vec_zero))))
+
+;; Byte multiply, exactly as at 128 bits: the even/odd products of the
+;; meaningful bytes land in big-endian halfwords 0-3, and combining each
+;; pair into one halfword leaves all eight result bytes in doubleword 0.
+(rule 6 (lower (imul $I8X8 x y))
+  (let ((xr Reg (put_in_reg x))
+        (yr Reg (put_in_reg y))
+        (odd Reg (vec_alu_rrr (VecAluOp.MulEvenU) xr yr $I8X16))
+        (even Reg (vec_alu_rrr (VecAluOp.MulOddU) xr yr $I8X16))
+        (eight Reg (vec_splt_imm 8 $I16X8))
+        (odd_hi Reg (vec_alu_rrr (VecAluOp.Shl) odd eight $I16X8))
+        (byte_mask Reg (vec_alu_rrr (VecAluOp.ShrU)
+                                    (vec_splt_imm -1 $I8X16) eight $I16X8))
+        (even_lo Reg (vec_alu_rrr (VecAluOp.And) even byte_mask $I16X8)))
+    (output_reg (vec_alu_rrr (VecAluOp.Or) odd_hi even_lo $I8X16))))
+
+;; High halves of the products, for a 64-bit source. The even/odd
+;; multiplies leave the meaningful products in the *high* big-endian
+;; elements of the double-width result -- there are only four of them,
+;; not eight -- so the high merge interleaves them back into source
+;; order, filling all eight, and one shift and pack then puts the eight
+;; high halves in doubleword 0. That is one merge fewer than the
+;; 128-bit sequence needs, which has products in both halves.
+(decl mulhi_narrow64 (Reg Reg Type i8) Reg)
+(rule (mulhi_narrow64 evens odds prod_ty shift)
+  (let ((merged Reg (vec_alu_rrr (VecAluOp.MergeHigh) evens odds prod_ty))
+        (amt Reg (vec_splt_imm shift prod_ty))
+        (sh Reg (vec_alu_rrr (VecAluOp.ShrU) merged amt prod_ty)))
+    (vec_alu_rrr (VecAluOp.PackMod) sh sh prod_ty)))
+
+(rule 4 (lower (smulhi $I8X8 x y))
+  (output_reg (mulhi_narrow64
+                (vec_alu_rrr (VecAluOp.MulEvenS) (put_in_reg x) (put_in_reg y) $I8X16)
+                (vec_alu_rrr (VecAluOp.MulOddS) (put_in_reg x) (put_in_reg y) $I8X16)
+                $I16X8 8)))
+(rule 4 (lower (umulhi $I8X8 x y))
+  (output_reg (mulhi_narrow64
+                (vec_alu_rrr (VecAluOp.MulEvenU) (put_in_reg x) (put_in_reg y) $I8X16)
+                (vec_alu_rrr (VecAluOp.MulOddU) (put_in_reg x) (put_in_reg y) $I8X16)
+                $I16X8 8)))
+(rule 4 (lower (smulhi $I16X4 x y))
+  (output_reg (mulhi_narrow64
+                (vec_alu_rrr (VecAluOp.MulEvenS) (put_in_reg x) (put_in_reg y) $I16X8)
+                (vec_alu_rrr (VecAluOp.MulOddS) (put_in_reg x) (put_in_reg y) $I16X8)
+                $I32X4 -16)))
+(rule 4 (lower (umulhi $I16X4 x y))
+  (output_reg (mulhi_narrow64
+                (vec_alu_rrr (VecAluOp.MulEvenU) (put_in_reg x) (put_in_reg y) $I16X8)
+                (vec_alu_rrr (VecAluOp.MulOddU) (put_in_reg x) (put_in_reg y) $I16X8)
+                $I32X4 -16)))
+
+;; The word case has a doubleword product, so the merge granularity the
+;; narrow path needs does not exist; the two halves are gathered
+;; instead, exactly as `iadd_pairwise` does at this width.
+(rule 4 (lower (smulhi $I32X2 x y))
+  (output_reg (mulhi_i32x4
+                (vec_alu_rrr (VecAluOp.MulOddS) (put_in_reg x) (put_in_reg y) $I32X4)
+                (vec_alu_rrr (VecAluOp.MulEvenS) (put_in_reg x) (put_in_reg y) $I32X4))))
+(rule 4 (lower (umulhi $I32X2 x y))
+  (output_reg (mulhi_i32x4
+                (vec_alu_rrr (VecAluOp.MulOddU) (put_in_reg x) (put_in_reg y) $I32X4)
+                (vec_alu_rrr (VecAluOp.MulEvenU) (put_in_reg x) (put_in_reg y) $I32X4))))
+
+;; Narrowing. The pack fills the result's big-endian doubleword 0 from
+;; its *first* operand's eight lanes, and here each source contributes
+;; only four -- so the two are gathered into one register first, `y`
+;; below `x`, which is the order that leaves CLIF's `x` in the low
+;; lanes.
+(decl narrow64 (VecAluOp Value Value Type) Reg)
+(rule (narrow64 op x y in_ty)
+  (let ((gathered Reg (vec_permdi (put_in_reg y) (put_in_reg x) 0)))
+    (vec_alu_rrr op gathered gathered in_ty)))
+
+;; The pack is selected by the *source* lane width, and these
+;; opcodes' controlling type is the narrower result -- so, as in the
+;; 128-bit rules, the width comes from the argument.
+(rule 1 (lower (snarrow _ x @ (value_type (ty_vec64 in_ty)) y))
+  (output_reg (narrow64 (VecAluOp.PackSS) x y in_ty)))
+(rule 1 (lower (unarrow _ x @ (value_type (ty_vec64 in_ty)) y))
+  (output_reg (narrow64 (VecAluOp.PackSU) x y in_ty)))
+(rule 1 (lower (uunarrow _ x @ (value_type (ty_vec64 in_ty)) y))
+  (output_reg (narrow64 (VecAluOp.PackUU) x y in_ty)))
