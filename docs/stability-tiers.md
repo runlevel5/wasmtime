@@ -312,8 +312,9 @@ here is:
 
 ##### ppc64le
 
-Vector support is not implemented in the ppc64le backend yet, so the `simd`
-and `relaxed-simd` proposals are reported as unsupported rather than
+The ppc64le backend implements the v128 vector grid, so `simd` is
+supported; the `relaxed-simd` additions are not, and are reported as
+unsupported rather than
 failing at compile time.
 
 | Feature                                 | Cranelift | Winch  |
@@ -324,7 +325,7 @@ failing at compile time.
 | [`multi-value`]                         | ✅        | ❌     |
 | [`bulk-memory`]                         | ✅        | ❌     |
 | [`reference-types`]                     | ✅        | ❌     |
-| [`simd`]                                | ❌        | ❌     |
+| [`simd`]                                | ✅        | ❌     |
 | [`component-model`]                     | ✅        | ❌     |
 | [`relaxed-simd`]                        | ❌        | ❌     |
 | [`multi-memory`]                        | ✅        | ❌     |

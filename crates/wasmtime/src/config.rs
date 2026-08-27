@@ -2466,10 +2466,10 @@ impl Config {
                     }
                 }
 
-                // The ppc64le backend does not implement vector lowerings
-                // yet.
+                // The ppc64le backend implements the v128 SIMD grid but
+                // not the relaxed-SIMD additions.
                 if let Architecture::Powerpc64le = self.compiler_target().architecture {
-                    unsupported |= WasmFeatures::SIMD | WasmFeatures::RELAXED_SIMD;
+                    unsupported |= WasmFeatures::RELAXED_SIMD;
                 }
             }
             Some(Strategy::Winch) => {
