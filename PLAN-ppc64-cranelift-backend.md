@@ -1433,6 +1433,123 @@ POWER10, word-wide rounding multiply — each verified to compile on
 aarch64, so each a real ISA difference), and the 128-bit
 division/remainder/high-multiply/float conversions no backend lowers.
 
+#### POWER10 validation, and SIMD enabled (2026-08-26)
+
+First run on POWER10 (OSUOSL, `power10` host, 8 cores, 15 GB RAM --
+note the POWER9 spec run once peaked at 42 GB, so chunk work there).
+
+| Check | Result |
+|---|---|
+| Cranelift filetests | 1320 pass natively |
+| Encoder goldens | pass |
+| ISA feature detection | `has_isa_3_0` **and `has_isa_3_1`** inferred |
+| Core spec suite | 250/257, the 7 being relaxed-SIMD |
+| `simd_*.wast` | **59/59** |
+
+`has_isa_3_1` had never been exercised anywhere before: HWCAP2 reads
+`0xbef60000`, carrying both the ISA 3.0 and 3.1 bits, and the
+constants in `config.rs` match. MMA is advertised too.
+
+**Two method notes worth keeping.**
+
+The first spec run showed 27 failures that were *not real*: every one
+was an `assert_invalid` directive — module validation, which runs
+before Cranelift is involved at all — failing on error-message
+*wording*. The CLI compares those strings strictly; the real harness
+passes `--ignore-error-messages`. With that flag: 191/191. Checking
+all 27 rather than assuming was worth it, since "27 failures on new
+hardware" reads alarming.
+
+Building the test harness there needs `wasm32-*` std, which the distro
+Rust lacks, and installing it would have **upgraded the system Rust
+compiler on a shared machine**. Routed around it instead by building
+only the `wasmtime` binary (`test-programs-artifacts` is a
+dev-dependency) and driving `.wast` files through `wasmtime wast`.
+
+**SIMD is now enabled.** With the v128 grid complete, `simd` was
+removed from `compiler_panicking_wasm_features`; only `relaxed-simd`
+remains gated. POWER9 goes from 1954 to **2442 passing, 0 failing**.
+
+Two things fell out of it:
+
+- `canonicalize-nan-scalar.wast` was flagged should-fail because scalar
+  NaN canonicalization uses vector ops. It passes now, so the entry is
+  gone — the harness reports a should-fail test that *succeeds* as a
+  failure, which is how it surfaced. A skip list needs pruning as
+  capability lands, or it silently becomes a lie.
+- **A Pulley bug on ppc64le hosts.** Two spec tests fail under Pulley
+  when the host is ppc64le and pass under Pulley on x86_64 and
+  aarch64 — verified by running the same files both places. Pulley is
+  the portable interpreter and our backend passes both, so this is
+  Pulley's bug. The old blanket "SIMD unsupported on this host"
+  condition had been masking one of them **for every compiler**, not
+  just Cranelift — a reminder that host-scoped gates hide more than
+  they look like they do. Recorded as known-failing, scoped to Pulley.
+  **Worth reporting upstream** (human-only, per BA policy).
+
+#### 256- and 512-bit vectors: investigated, not viable (2026-08-26)
+
+Investigated on the POWER10 itself rather than from documentation,
+because the premise deserved checking: does POWER10 have 512-bit
+vectors?
+
+**It does not, for any purpose Cranelift could use.** POWER10's VSX
+registers are still 128-bit. What is 512 bits wide is the **MMA
+accumulators** (ACC0-7), and they are outer-product matrix
+accumulators -- `xvi8ger4`, `xvf32ger`, `xvf64ger` and friends -- not
+general-purpose SIMD registers. There is no lane-wise add, compare,
+shuffle or select on an accumulator.
+
+Measured directly on the machine, compiling GCC vector extensions with
+`-mcpu=power10`:
+
+| Source | Emitted |
+|---|---|
+| 256-bit vector add | **2** `vadduwm` (two 128-bit registers) |
+| 512-bit vector add | **4** `vadduwm` (four 128-bit registers) |
+| either | **0** MMA instructions |
+
+GCC splits wide vectors across multiple 128-bit registers; it does not
+reach for MMA, because MMA cannot do elementwise arithmetic.
+
+**And nothing else in Cranelift supports them either.** Checked every
+backend's `rc_for_type`: x86_64 caps at `bits() <= 128`, s390x at
+`== 128`, and ours at 128 or 64. Across the whole repository the types
+`I8X32`, `I32X8`, `I8X64`, `F64X8` and the rest appear **only in
+`types.rs` where they are defined** -- no backend lowers them, no
+frontend produces them, wasm SIMD is v128-only.
+
+Implementing them would mean multi-register vector values (2 or 4 VSRs
+each, the way `i128` uses two GPRs), a second full lowering grid of
+~236 operations split across register pairs or quads, and an invented
+ABI convention, since ELFv2 has no 256- or 512-bit vector type to
+match. For a type nothing generates and no other backend accepts, on
+hardware that would execute it as 2-4 sequential 128-bit operations --
+exactly what the compiler would produce anyway from two or four v128
+values. **Not worth doing**, and left failing with a clean
+`Unsupported` error.
+
+**The real POWER10 opportunities are elsewhere**, and `has_isa_3_1` is
+currently a declared-but-unused flag, so they are all unclaimed.
+Verified present with `llvm-mc -mcpu=pwr10` on the machine:
+
+- **`vmulld`** -- vector multiply low doubleword. Would replace the
+  six-instruction `imul.i64x2` sequence built from 32-bit halves with
+  one instruction.
+- **`vmulhsd` / `vmulhud`** -- vector multiply high doubleword. These
+  would **close the `smulhi`/`umulhi` on `i64x2` gap** that is
+  currently excluded from fuzzgen as an ISA limitation. It is a POWER8
+  limitation, not a POWER10 one.
+- **`paddi` with R=1** -- prefixed PC-relative addressing. Would
+  replace the `bcl 20,31,$+4; mflr` idiom this backend uses for symbol
+  and label addresses, in the two places flagged in `inst.isle`.
+
+Each would need to be gated on `has_isa_3_1` with the POWER8 sequence
+retained as fallback, exactly as `has_isa_3_0` gates `cnttz` and the
+modulo instructions today. Phase 6 material, and worth measuring first
+-- Phase 6 already found that instruction-count wins off the critical
+path do not necessarily show up in wall-clock on this family.
+
 ### Phase 6 — Tuning
 
 POWER9/10 fast paths (`isel`, `setb`, mod instructions, P10 pcrel to kill
