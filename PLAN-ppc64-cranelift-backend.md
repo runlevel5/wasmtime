@@ -1598,6 +1598,67 @@ would add memory traffic. Any future tuning should target dependency
 chains or memory behaviour, and must be measured -- given ~10% noise,
 an 11% instruction reduction is not even detectable here.
 
+#### POWER10 fast paths (2026-10-15)
+
+`has_isa_3_1` was a declared-but-unused flag; all three opportunities
+identified in the 256/512-bit investigation are now implemented, each
+gated on it with the POWER8 sequence kept as the fallback.
+
+| Site | Before (POWER8/9) | POWER10 |
+|---|---|---|
+| `imul.i64x2` | 6 VMX ops + a splat (32-bit halves) | `vmulld` |
+| `smulhi`/`umulhi` `i64x2` | **not lowered** (fuzzgen exclusion) | `vmulh{s,u}d` |
+| `smulhi`/`umulhi` `i32x4`/`i32x2` | even/odd multiplies + `vmrgew` | `vmulh{s,u}w` |
+| `LoadExtName` | `bcl 20,31,$+4; mflr; ld` | `pld rd, 12(pc)` |
+| `LabelAddress` | `bcl; mflr; addis; addi` | `paddi rd, 0, label, 1` (new `LabelUse::PCRel34`) |
+| `BrTable` table address | `bcl; mflr; addi` | `paddi rd, 0, 24, 1` |
+
+The PC-relative forms no longer clobber LR. The fuzzgen exclusion for
+`i64x2` high multiply now checks the target's `has_isa_3_1`;
+`valid_for_target` takes the `TargetIsa` instead of just the triple.
+
+**The one real hazard: prefixed instructions must not cross a 64-byte
+boundary** (an alignment interrupt otherwise). `emit_prefixed` pads with
+a `nop` when the prefix would sit at offset ≡ 60 (mod 64), and raises
+the buffer's minimum alignment to 64 via
+`set_log2_min_function_alignment(6)`, so only functions that actually
+use a prefixed instruction pay for the alignment. Wasmtime's text
+builder and cranelift-jit both honour `buffer.alignment`. A unit test
+covers every start offset over two blocks.
+
+**Validation, all on the POWER10:**
+
+- Encodings: `vmulld`/`vmulh{s,u}{w,d}`/`paddi`/`pld` goldens from
+  `llvm-mc -mcpu=pwr10` (`isa_3_1_encodings`). Capstone predates ISA 3.1
+  and cannot decode prefixed instructions, so the precise-output tests
+  (`simd-mul-power10.clif`, `pcrel-power10.clif`) show raw bytes there.
+- Filetests: 1328 pass natively. 15 runtests gained a
+  `target powerpc64le has_isa_3_0 has_isa_3_1` line (multiply batches,
+  `simd-{s,u}mulhi`, `simd-imul`, `simd-ifma`, `br_table`, calls,
+  `try_call`/`throw`, tail calls). A deliberately wrong expectation
+  failed, proving the POWER10 lines execute rather than skip.
+- Spec/misc `.wast` via the CLI, A/B with `-Ccranelift-has_isa_3_1=false`:
+  **identical failure sets** (542 pass in both). The 87 failures all
+  come from CLI-vs-harness configuration (relaxed-SIMD gated,
+  stack-switching, GC/component/NaN-canonicalization tests that need
+  per-directory harness settings), not from codegen.
+- Real Wasmtime output, disassembled with GNU objdump 2.46 (which spells
+  `paddi …,1` as `pla`): no `bcl` remains, every `pla` resolves to the
+  right target (jump table, exception handler), no prefix sits at
+  offset ≡ 60 (mod 64), and the functions that use them start 64-byte
+  aligned.
+
+**Measured:** a latency-bound `i64x2.mul` chain (200M iterations) runs in
+**~220 ms vs ~800 ms**, a **3.7x** speedup with identical results.
+Unlike Phase 6's off-critical-path instruction cuts, this replaces a
+dependency chain, so it shows in wall-clock time. The PC-relative
+changes were not benchmarked; they remove LR traffic and two or three
+instructions per site off hot loops, so expect them to be within noise.
+
+Not done: using prefixed `pld` for a constant pool in `LoadConst64`.
+Phase 6 already found constant materialization is off the critical path
+on this family.
+
 ### Phase 7 — Big-endian ppc64: ELFv2-BE, then ELFv1 (≈2–4 months)
 
 **Targets and ABI selection.** Big-endian is
