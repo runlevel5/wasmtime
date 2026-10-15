@@ -2,6 +2,7 @@ test interpret
 test run
 target powerpc64le
 target powerpc64le has_isa_3_0
+target powerpc64le has_isa_3_0 has_isa_3_1
 
 function %imul_i64x2(i64x2, i64x2) -> i64x2 {
 block0(v0: i64x2, v1: i64x2):

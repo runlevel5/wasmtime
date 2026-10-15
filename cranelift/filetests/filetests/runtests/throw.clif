@@ -5,6 +5,7 @@ target aarch64
 target riscv64
 target s390x
 target powerpc64le
+target powerpc64le has_isa_3_0 has_isa_3_1
 
 function %entry() -> i64 tail {
   fn0 = %main(i64) -> i64 tail

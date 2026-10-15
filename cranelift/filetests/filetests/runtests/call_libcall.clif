@@ -8,6 +8,7 @@ target s390x
 target riscv64
 target riscv64 has_c has_zcb
 target powerpc64le
+target powerpc64le has_isa_3_0 has_isa_3_1
 
 
 function %libcall_ceilf32(f32) -> f32 {

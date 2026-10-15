@@ -312,6 +312,35 @@ pub(crate) const TRAP_INSTRUCTION: u32 = 0;
 /// A no-op: `ori r0, r0, 0`.
 pub(crate) const NOP_INSTRUCTION: u32 = 24 << 26;
 
+/// The high 18 and low 16 bits of a 34-bit signed displacement, as an
+/// ISA 3.1 prefixed instruction splits it between its prefix and
+/// suffix words.
+fn split_d34(d34: i64) -> (u32, u32) {
+    debug_assert!((-(1i64 << 33)..(1i64 << 33)).contains(&d34));
+    (((d34 >> 16) as u32) & 0x3_FFFF, (d34 as u32) & 0xFFFF)
+}
+
+/// Prefix word with R=1 (PC-relative): `1 | type | R | d0`. Type 0 is
+/// the eight-byte load/store form (8LS), type 2 the modified
+/// load/store form (MLS).
+fn prefix_pcrel(ty: u32, hi18: u32) -> u32 {
+    (1 << 26) | (ty << 24) | (1 << 20) | hi18
+}
+
+/// ISA 3.1 `paddi rt, 0, d34, 1`: rt = CIA + d34, where CIA is the
+/// address of the prefix word. Returns `(prefix, suffix)`.
+pub(crate) fn enc_paddi_pcrel(rt: u32, d34: i64) -> (u32, u32) {
+    let (hi, lo) = split_d34(d34);
+    (prefix_pcrel(2, hi), enc_d(14, rt, 0, lo as u16))
+}
+
+/// ISA 3.1 `pld rt, d34(0), 1`: load the doubleword at CIA + d34.
+/// Returns `(prefix, suffix)`.
+pub(crate) fn enc_pld_pcrel(rt: u32, d34: i64) -> (u32, u32) {
+    let (hi, lo) = split_d34(d34);
+    (prefix_pcrel(0, hi), enc_d(57, rt, 0, lo as u16))
+}
+
 /// fmr, X-form on FPRs: `63 | FRT | 0 | FRB | 72 | 0`.
 pub(crate) fn enc_fmr(frt: u32, frb: u32) -> u32 {
     (63 << 26) | (frt << 21) | (frb << 11) | (72 << 1)
@@ -516,5 +545,21 @@ mod tests {
         assert_eq!(enc_cror(2, 0, 2), 0x4C40_1382); // cror cr0eq, cr0lt, cr0eq
         assert_eq!(enc_xx1(6, 4, 179), 0x7CC4_0166); // mtvsrd f6, r4
         assert_eq!(enc_xx1(1, 4, 51), 0x7C24_0066); // mfvsrd r4, f1
+    }
+
+    #[test]
+    fn isa_3_1_encodings() {
+        // Verified against llvm-mc -mcpu=pwr10 on a POWER10 host.
+        assert_eq!(enc_vx(2, 3, 4, 457), 0x1043_21C9); // vmulld v2, v3, v4
+        assert_eq!(enc_vx(2, 3, 4, 969), 0x1043_23C9); // vmulhsd v2, v3, v4
+        assert_eq!(enc_vx(2, 3, 4, 713), 0x1043_22C9); // vmulhud v2, v3, v4
+        assert_eq!(enc_vx(2, 3, 4, 905), 0x1043_2389); // vmulhsw v2, v3, v4
+        assert_eq!(enc_vx(2, 3, 4, 649), 0x1043_2289); // vmulhuw v2, v3, v4
+        // paddi r3, 0, 0x12345678, 1
+        assert_eq!(enc_paddi_pcrel(3, 0x1234_5678), (0x0610_1234, 0x3860_5678));
+        // paddi r3, 0, -4, 1
+        assert_eq!(enc_paddi_pcrel(3, -4), (0x0613_FFFF, 0x3860_FFFC));
+        // pld r3, 12(0), 1
+        assert_eq!(enc_pld_pcrel(3, 12), (0x0410_0000, 0xE460_000C));
     }
 }

@@ -15,7 +15,7 @@ use cranelift::codegen::ir::{
 };
 use cranelift::codegen::isa::CallConv;
 use cranelift::frontend::{FunctionBuilder, FunctionBuilderContext, Switch, Variable};
-use cranelift::prelude::isa::OwnedTargetIsa;
+use cranelift::prelude::isa::{OwnedTargetIsa, TargetIsa};
 use cranelift::prelude::{
     ExtFuncData, FloatCC, InstBuilder, IntCC, JumpTableData, MemFlagsData, StackSlotData,
     StackSlotKind,
@@ -24,7 +24,7 @@ use std::collections::HashMap;
 use std::ops::RangeInclusive;
 use std::str::FromStr;
 use std::sync::LazyLock;
-use target_lexicon::{Architecture, Triple};
+use target_lexicon::Architecture;
 
 type BlockSignature = Vec<Type>;
 
@@ -421,7 +421,7 @@ macro_rules! exceptions {
 /// with specific lowerings on specific backends, and we don't want to get
 /// fuzz bug reports for those. Over time our goal is to eliminate all of these
 /// exceptions.
-fn valid_for_target(triple: &Triple, op: Opcode, args: &[Type], rets: &[Type]) -> bool {
+fn valid_for_target(isa: &dyn TargetIsa, op: Opcode, args: &[Type], rets: &[Type]) -> bool {
     // Rule out invalid combinations that we don't yet have a good way of rejecting with the
     // instruction DSL type constraints.
     match op {
@@ -472,7 +472,7 @@ fn valid_for_target(triple: &Triple, op: Opcode, args: &[Type], rets: &[Type]) -
         _ => {}
     }
 
-    match triple.architecture {
+    match isa.triple().architecture {
         Architecture::X86_64 => {
             exceptions!(
                 op,
@@ -666,6 +666,19 @@ fn valid_for_target(triple: &Triple, op: Opcode, args: &[Type], rets: &[Type]) -
         }
 
         Architecture::Powerpc64le => {
+            // POWER10 multiplies doubleword high halves directly.
+            let has_isa_3_1 = isa
+                .isa_flags()
+                .iter()
+                .any(|f| f.name == "has_isa_3_1" && f.as_bool() == Some(true));
+            if has_isa_3_1
+                && matches!(
+                    (op, args),
+                    (Opcode::Umulhi | Opcode::Smulhi, &[I64X2, I64X2])
+                )
+            {
+                return true;
+            }
             exceptions!(
                 op,
                 args,
@@ -697,7 +710,8 @@ fn valid_for_target(triple: &Triple, op: Opcode, args: &[Type], rets: &[Type]) -
                 // Concatenating to anything but an i128 is not lowered.
                 (Opcode::Iconcat, &[I8 | I16 | I32, I8 | I16 | I32], _),
                 // The ISA has no doubleword saturating arithmetic, no
-                // doubleword high-half multiply before POWER10, and its
+                // doubleword high-half multiply before POWER10 (allowed
+                // above when the target has it), and its
                 // rounding multiply is halfword-only. Nothing in wasm or
                 // in the runtests reaches these, so they are left out
                 // rather than emulated.
@@ -1531,7 +1545,7 @@ where
             // We filter out instructions that aren't supported by the target at this point instead
             // of building a single vector of valid instructions at the beginning of function
             // generation, to avoid invalidating the corpus when instructions are enabled/disabled.
-            if !valid_for_target(&self.isa.triple(), *op, &args, &rets) {
+            if !valid_for_target(&*self.isa, *op, &args, &rets) {
                 return Err(arbitrary::Error::IncorrectFormat.into());
             }
 

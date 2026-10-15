@@ -2,6 +2,7 @@ test interpret
 test run
 target powerpc64le
 target powerpc64le has_isa_3_0
+target powerpc64le has_isa_3_0 has_isa_3_1
 
 ;; High-half multiply. Every lane carries a different value so a wrong
 ;; gather -- picking the low half, or the mirrored lane -- shows up.

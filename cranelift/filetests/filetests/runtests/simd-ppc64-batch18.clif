@@ -2,6 +2,7 @@ test interpret
 test run
 target powerpc64le
 target powerpc64le has_isa_3_0
+target powerpc64le has_isa_3_0 has_isa_3_1
 
 ;; Completion of the 64-bit vector grid. Every expectation below is
 ;; computed from CLIF's semantics independently of the lowering, so

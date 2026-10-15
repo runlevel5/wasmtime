@@ -1,0 +1,697 @@
+test compile precise-output
+target powerpc64le power10
+
+; ISA 3.1 has PC-relative addressing, so the three sites that read the PC
+; with `bcl 20,31,$+4; mflr` use a prefixed instruction instead and leave
+; LR alone. A prefixed instruction must not cross a 64-byte boundary, so
+; any function that uses one is 64-byte aligned and pads with a `nop`
+; where needed.
+;
+; Capstone predates ISA 3.1 and cannot decode prefixed instructions, so
+; below they appear as raw bytes (or a prefix followed by a misread
+; suffix). Their encodings are pinned against llvm-mc by
+; `isa_3_1_encodings` in inst/encode.rs.
+
+; The jump table address is a single `paddi`.
+function %br_table(i32) -> i64 {
+block0(v0: i32):
+    br_table v0, block4, [block1, block2, block3]
+block1:
+    v1 = iconst.i64 1
+    return v1
+block2:
+    v2 = iconst.i64 2
+    return v2
+block3:
+    v3 = iconst.i64 3
+    return v3
+block4:
+    v4 = iconst.i64 -1
+    return v4
+}
+
+; VCode:
+;   mflr r0
+;   load_addr sp, -16(sp)
+;   std r0, 8(sp)
+;   std fp, 0(sp)
+;   mr fp, sp
+; block0:
+;   br_table r3 # 3 targets
+; block1:
+;   load_const r3, 0x3
+;   ld r0, 8(sp)
+;   mtlr r0
+;   ld fp, 0(sp)
+;   load_addr sp, 16(sp)
+;   blr
+; block2:
+;   load_const r3, 0x2
+;   ld r0, 8(sp)
+;   mtlr r0
+;   ld fp, 0(sp)
+;   load_addr sp, 16(sp)
+;   blr
+; block3:
+;   load_const r3, 0x1
+;   ld r0, 8(sp)
+;   mtlr r0
+;   ld fp, 0(sp)
+;   load_addr sp, 16(sp)
+;   blr
+; block4:
+;   load_const r3, 0xffffffffffffffff
+;   ld r0, 8(sp)
+;   mtlr r0
+;   ld fp, 0(sp)
+;   load_addr sp, 16(sp)
+;   blr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   mflr r0
+;   addi r1, r1, -0x10
+;   std r0, 8(r1)
+;   std r31, 0(r1)
+;   ori r31, r1, 0
+; block1: ; offset 0x14
+;   clrldi r7, r3, 0x20
+;   cmpldi r7, 3
+;   blt 0x24
+;   b 0x90
+;   .byte 0x00, 0x00, 0x10, 0x06
+;   li r6, 0x18
+;   sldi r7, r7, 2
+;   add r6, r6, r7
+;   mtctr r6
+;   bctr
+;   b 0x78
+;   b 0x60
+;   b 0x48
+; block2: ; offset 0x48
+;   li r3, 3
+;   ld r0, 8(r1)
+;   mtlr r0
+;   ld r31, 0(r1)
+;   addi r1, r1, 0x10
+;   blr
+; block3: ; offset 0x60
+;   li r3, 2
+;   ld r0, 8(r1)
+;   mtlr r0
+;   ld r31, 0(r1)
+;   addi r1, r1, 0x10
+;   blr
+; block4: ; offset 0x78
+;   li r3, 1
+;   ld r0, 8(r1)
+;   mtlr r0
+;   ld r31, 0(r1)
+;   addi r1, r1, 0x10
+;   blr
+; block5: ; offset 0x90
+;   li r3, -1
+;   ld r0, 8(r1)
+;   mtlr r0
+;   ld r31, 0(r1)
+;   addi r1, r1, 0x10
+;   blr
+
+function %func_addr() -> i64 {
+    fn0 = %g()
+
+block0:
+    v0 = func_addr.i64 fn0
+    return v0
+}
+
+; VCode:
+;   mflr r0
+;   load_addr sp, -16(sp)
+;   std r0, 8(sp)
+;   std fp, 0(sp)
+;   mr fp, sp
+; block0:
+;   load_ext_name r3, TestCase(%g)+0
+;   ld r0, 8(sp)
+;   mtlr r0
+;   ld fp, 0(sp)
+;   load_addr sp, 16(sp)
+;   blr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   mflr r0
+;   addi r1, r1, -0x10
+;   std r0, 8(r1)
+;   std r31, 0(r1)
+;   ori r31, r1, 0
+; block1: ; offset 0x14
+;   .byte 0x00, 0x00, 0x10, 0x04
+;   .byte 0x0c, 0x00, 0x60, 0xe4
+;   b 0x28
+;   .byte 0x00, 0x00, 0x00, 0x00 ; reloc_external Abs8 %g 0
+;   .byte 0x00, 0x00, 0x00, 0x00
+;   ld r0, 8(r1)
+;   mtlr r0
+;   ld r31, 0(r1)
+;   addi r1, r1, 0x10
+;   blr
+
+function %handler_address() -> i64 {
+    sig0 = () tail
+    fn0 = %g() tail
+
+    block0:
+        v1 = get_exception_handler_address.i64 block1, 0
+        jump block1
+
+    block1:
+        try_call fn0(), sig0, block2(), [ context v1, tag0: block3(exn1), default: block4() ]
+
+    block2:
+        return v1
+
+    block3(v2: i64):
+        return v2
+
+    block4:
+        return v1
+}
+
+; VCode:
+;   mflr r0
+;   load_addr sp, -16(sp)
+;   std r0, 8(sp)
+;   std fp, 0(sp)
+;   mr fp, sp
+;   load_addr sp, -496(sp)
+;   std r14, 488(sp)
+;   std r15, 480(sp)
+;   std r16, 472(sp)
+;   std r17, 464(sp)
+;   std r18, 456(sp)
+;   std r19, 448(sp)
+;   std r20, 440(sp)
+;   std r21, 432(sp)
+;   std r22, 424(sp)
+;   std r23, 416(sp)
+;   std r24, 408(sp)
+;   std r25, 400(sp)
+;   std r26, 392(sp)
+;   std r27, 384(sp)
+;   std r28, 376(sp)
+;   std r29, 368(sp)
+;   std r30, 360(sp)
+;   std fp, 352(sp)
+;   stfd f14, 344(sp)
+;   stfd f15, 336(sp)
+;   stfd f16, 328(sp)
+;   stfd f17, 320(sp)
+;   stfd f18, 312(sp)
+;   stfd f19, 304(sp)
+;   stfd f20, 296(sp)
+;   stfd f21, 288(sp)
+;   stfd f22, 280(sp)
+;   stfd f23, 272(sp)
+;   stfd f24, 264(sp)
+;   stfd f25, 256(sp)
+;   stfd f26, 248(sp)
+;   stfd f27, 240(sp)
+;   stfd f28, 232(sp)
+;   stfd f29, 224(sp)
+;   stfd f30, 216(sp)
+;   stfd f31, 208(sp)
+;   vec_store v20, 192(sp)
+;   vec_store v21, 176(sp)
+;   vec_store v22, 160(sp)
+;   vec_store v23, 144(sp)
+;   vec_store v24, 128(sp)
+;   vec_store v25, 112(sp)
+;   vec_store v26, 96(sp)
+;   vec_store v27, 80(sp)
+;   vec_store v28, 64(sp)
+;   vec_store v29, 48(sp)
+;   vec_store v30, 32(sp)
+;   vec_store v31, 16(sp)
+; block0:
+;   label_address r5, MachLabel(4)
+;   std r5, 0(slot)
+;   b MachLabel(1)
+; block1:
+;   load_ext_name r12, TestCase(%g)+0
+;   mtctr r12; bctrl
+; block2:
+;   ld r3, 0(slot)
+;   ld r14, 488(sp)
+;   ld r15, 480(sp)
+;   ld r16, 472(sp)
+;   ld r17, 464(sp)
+;   ld r18, 456(sp)
+;   ld r19, 448(sp)
+;   ld r20, 440(sp)
+;   ld r21, 432(sp)
+;   ld r22, 424(sp)
+;   ld r23, 416(sp)
+;   ld r24, 408(sp)
+;   ld r25, 400(sp)
+;   ld r26, 392(sp)
+;   ld r27, 384(sp)
+;   ld r28, 376(sp)
+;   ld r29, 368(sp)
+;   ld r30, 360(sp)
+;   ld fp, 352(sp)
+;   lfd f14, 344(sp)
+;   lfd f15, 336(sp)
+;   lfd f16, 328(sp)
+;   lfd f17, 320(sp)
+;   lfd f18, 312(sp)
+;   lfd f19, 304(sp)
+;   lfd f20, 296(sp)
+;   lfd f21, 288(sp)
+;   lfd f22, 280(sp)
+;   lfd f23, 272(sp)
+;   lfd f24, 264(sp)
+;   lfd f25, 256(sp)
+;   lfd f26, 248(sp)
+;   lfd f27, 240(sp)
+;   lfd f28, 232(sp)
+;   lfd f29, 224(sp)
+;   lfd f30, 216(sp)
+;   lfd f31, 208(sp)
+;   vec_load v20, 192(sp)
+;   vec_load v21, 176(sp)
+;   vec_load v22, 160(sp)
+;   vec_load v23, 144(sp)
+;   vec_load v24, 128(sp)
+;   vec_load v25, 112(sp)
+;   vec_load v26, 96(sp)
+;   vec_load v27, 80(sp)
+;   vec_load v28, 64(sp)
+;   vec_load v29, 48(sp)
+;   vec_load v30, 32(sp)
+;   vec_load v31, 16(sp)
+;   load_addr sp, 496(sp)
+;   ld r0, 8(sp)
+;   mtlr r0
+;   ld fp, 0(sp)
+;   load_addr sp, 16(sp)
+;   blr
+; block3:
+;   ld r3, 0(slot)
+;   ld r14, 488(sp)
+;   ld r15, 480(sp)
+;   ld r16, 472(sp)
+;   ld r17, 464(sp)
+;   ld r18, 456(sp)
+;   ld r19, 448(sp)
+;   ld r20, 440(sp)
+;   ld r21, 432(sp)
+;   ld r22, 424(sp)
+;   ld r23, 416(sp)
+;   ld r24, 408(sp)
+;   ld r25, 400(sp)
+;   ld r26, 392(sp)
+;   ld r27, 384(sp)
+;   ld r28, 376(sp)
+;   ld r29, 368(sp)
+;   ld r30, 360(sp)
+;   ld fp, 352(sp)
+;   lfd f14, 344(sp)
+;   lfd f15, 336(sp)
+;   lfd f16, 328(sp)
+;   lfd f17, 320(sp)
+;   lfd f18, 312(sp)
+;   lfd f19, 304(sp)
+;   lfd f20, 296(sp)
+;   lfd f21, 288(sp)
+;   lfd f22, 280(sp)
+;   lfd f23, 272(sp)
+;   lfd f24, 264(sp)
+;   lfd f25, 256(sp)
+;   lfd f26, 248(sp)
+;   lfd f27, 240(sp)
+;   lfd f28, 232(sp)
+;   lfd f29, 224(sp)
+;   lfd f30, 216(sp)
+;   lfd f31, 208(sp)
+;   vec_load v20, 192(sp)
+;   vec_load v21, 176(sp)
+;   vec_load v22, 160(sp)
+;   vec_load v23, 144(sp)
+;   vec_load v24, 128(sp)
+;   vec_load v25, 112(sp)
+;   vec_load v26, 96(sp)
+;   vec_load v27, 80(sp)
+;   vec_load v28, 64(sp)
+;   vec_load v29, 48(sp)
+;   vec_load v30, 32(sp)
+;   vec_load v31, 16(sp)
+;   load_addr sp, 496(sp)
+;   ld r0, 8(sp)
+;   mtlr r0
+;   ld fp, 0(sp)
+;   load_addr sp, 16(sp)
+;   blr
+; block4:
+;   mr r3, r4
+;   ld r14, 488(sp)
+;   ld r15, 480(sp)
+;   ld r16, 472(sp)
+;   ld r17, 464(sp)
+;   ld r18, 456(sp)
+;   ld r19, 448(sp)
+;   ld r20, 440(sp)
+;   ld r21, 432(sp)
+;   ld r22, 424(sp)
+;   ld r23, 416(sp)
+;   ld r24, 408(sp)
+;   ld r25, 400(sp)
+;   ld r26, 392(sp)
+;   ld r27, 384(sp)
+;   ld r28, 376(sp)
+;   ld r29, 368(sp)
+;   ld r30, 360(sp)
+;   ld fp, 352(sp)
+;   lfd f14, 344(sp)
+;   lfd f15, 336(sp)
+;   lfd f16, 328(sp)
+;   lfd f17, 320(sp)
+;   lfd f18, 312(sp)
+;   lfd f19, 304(sp)
+;   lfd f20, 296(sp)
+;   lfd f21, 288(sp)
+;   lfd f22, 280(sp)
+;   lfd f23, 272(sp)
+;   lfd f24, 264(sp)
+;   lfd f25, 256(sp)
+;   lfd f26, 248(sp)
+;   lfd f27, 240(sp)
+;   lfd f28, 232(sp)
+;   lfd f29, 224(sp)
+;   lfd f30, 216(sp)
+;   lfd f31, 208(sp)
+;   vec_load v20, 192(sp)
+;   vec_load v21, 176(sp)
+;   vec_load v22, 160(sp)
+;   vec_load v23, 144(sp)
+;   vec_load v24, 128(sp)
+;   vec_load v25, 112(sp)
+;   vec_load v26, 96(sp)
+;   vec_load v27, 80(sp)
+;   vec_load v28, 64(sp)
+;   vec_load v29, 48(sp)
+;   vec_load v30, 32(sp)
+;   vec_load v31, 16(sp)
+;   load_addr sp, 496(sp)
+;   ld r0, 8(sp)
+;   mtlr r0
+;   ld fp, 0(sp)
+;   load_addr sp, 16(sp)
+;   blr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   mflr r0
+;   addi r1, r1, -0x10
+;   std r0, 8(r1)
+;   std r31, 0(r1)
+;   ori r31, r1, 0
+;   addi r1, r1, -0x1f0
+;   std r14, 0x1e8(r1)
+;   std r15, 0x1e0(r1)
+;   std r16, 0x1d8(r1)
+;   std r17, 0x1d0(r1)
+;   std r18, 0x1c8(r1)
+;   std r19, 0x1c0(r1)
+;   std r20, 0x1b8(r1)
+;   std r21, 0x1b0(r1)
+;   std r22, 0x1a8(r1)
+;   std r23, 0x1a0(r1)
+;   std r24, 0x198(r1)
+;   std r25, 0x190(r1)
+;   std r26, 0x188(r1)
+;   std r27, 0x180(r1)
+;   std r28, 0x178(r1)
+;   std r29, 0x170(r1)
+;   std r30, 0x168(r1)
+;   std r31, 0x160(r1)
+;   stfd f14, 0x158(r1)
+;   stfd f15, 0x150(r1)
+;   stfd f16, 0x148(r1)
+;   stfd f17, 0x140(r1)
+;   stfd f18, 0x138(r1)
+;   stfd f19, 0x130(r1)
+;   stfd f20, 0x128(r1)
+;   stfd f21, 0x120(r1)
+;   stfd f22, 0x118(r1)
+;   stfd f23, 0x110(r1)
+;   stfd f24, 0x108(r1)
+;   stfd f25, 0x100(r1)
+;   stfd f26, 0xf8(r1)
+;   stfd f27, 0xf0(r1)
+;   stfd f28, 0xe8(r1)
+;   stfd f29, 0xe0(r1)
+;   stfd f30, 0xd8(r1)
+;   stfd f31, 0xd0(r1)
+;   li r0, 0xc0
+;   stxvx v20, r1, r0
+;   li r0, 0xb0
+;   stxvx v21, r1, r0
+;   li r0, 0xa0
+;   stxvx v22, r1, r0
+;   li r0, 0x90
+;   stxvx v23, r1, r0
+;   li r0, 0x80
+;   stxvx v24, r1, r0
+;   li r0, 0x70
+;   stxvx v25, r1, r0
+;   li r0, 0x60
+;   stxvx v26, r1, r0
+;   li r0, 0x50
+;   stxvx v27, r1, r0
+;   li r0, 0x40
+;   stxvx v28, r1, r0
+;   li r0, 0x30
+;   stxvx v29, r1, r0
+;   li r0, 0x20
+;   stxvx v30, r1, r0
+;   li r0, 0x10
+;   stxvx v31, r1, r0
+; block1: ; offset 0x108
+;   .byte 0x00, 0x00, 0x10, 0x06
+;   li r5, 0x240
+;   std r5, 0(r1)
+; block2: ; offset 0x114
+;   .byte 0x00, 0x00, 0x10, 0x04
+;   .byte 0x0c, 0x00, 0x80, 0xe5
+;   b 0x128
+;   .byte 0x00, 0x00, 0x00, 0x00 ; reloc_external Abs8 %g 0
+;   .byte 0x00, 0x00, 0x00, 0x00
+;   mtctr r12
+;   bctrl
+; block3: ; offset 0x130
+;   ld r3, 0(r1)
+;   ld r14, 0x1e8(r1)
+;   ld r15, 0x1e0(r1)
+;   ld r16, 0x1d8(r1)
+;   ld r17, 0x1d0(r1)
+;   ld r18, 0x1c8(r1)
+;   ld r19, 0x1c0(r1)
+;   ld r20, 0x1b8(r1)
+;   ld r21, 0x1b0(r1)
+;   ld r22, 0x1a8(r1)
+;   ld r23, 0x1a0(r1)
+;   ld r24, 0x198(r1)
+;   ld r25, 0x190(r1)
+;   ld r26, 0x188(r1)
+;   ld r27, 0x180(r1)
+;   ld r28, 0x178(r1)
+;   ld r29, 0x170(r1)
+;   ld r30, 0x168(r1)
+;   ld r31, 0x160(r1)
+;   lfd f14, 0x158(r1)
+;   lfd f15, 0x150(r1)
+;   lfd f16, 0x148(r1)
+;   lfd f17, 0x140(r1)
+;   lfd f18, 0x138(r1)
+;   lfd f19, 0x130(r1)
+;   lfd f20, 0x128(r1)
+;   lfd f21, 0x120(r1)
+;   lfd f22, 0x118(r1)
+;   lfd f23, 0x110(r1)
+;   lfd f24, 0x108(r1)
+;   lfd f25, 0x100(r1)
+;   lfd f26, 0xf8(r1)
+;   lfd f27, 0xf0(r1)
+;   lfd f28, 0xe8(r1)
+;   lfd f29, 0xe0(r1)
+;   lfd f30, 0xd8(r1)
+;   lfd f31, 0xd0(r1)
+;   li r0, 0xc0
+;   lxvx v20, r1, r0
+;   li r0, 0xb0
+;   lxvx v21, r1, r0
+;   li r0, 0xa0
+;   lxvx v22, r1, r0
+;   li r0, 0x90
+;   lxvx v23, r1, r0
+;   li r0, 0x80
+;   lxvx v24, r1, r0
+;   li r0, 0x70
+;   lxvx v25, r1, r0
+;   li r0, 0x60
+;   lxvx v26, r1, r0
+;   li r0, 0x50
+;   lxvx v27, r1, r0
+;   li r0, 0x40
+;   lxvx v28, r1, r0
+;   li r0, 0x30
+;   lxvx v29, r1, r0
+;   li r0, 0x20
+;   lxvx v30, r1, r0
+;   li r0, 0x10
+;   lxvx v31, r1, r0
+;   addi r1, r1, 0x1f0
+;   ld r0, 8(r1)
+;   mtlr r0
+;   ld r31, 0(r1)
+;   addi r1, r1, 0x10
+;   blr
+; block4: ; offset 0x23c
+;   ld r3, 0(r1)
+;   ld r14, 0x1e8(r1)
+;   ld r15, 0x1e0(r1)
+;   ld r16, 0x1d8(r1)
+;   ld r17, 0x1d0(r1)
+;   ld r18, 0x1c8(r1)
+;   ld r19, 0x1c0(r1)
+;   ld r20, 0x1b8(r1)
+;   ld r21, 0x1b0(r1)
+;   ld r22, 0x1a8(r1)
+;   ld r23, 0x1a0(r1)
+;   ld r24, 0x198(r1)
+;   ld r25, 0x190(r1)
+;   ld r26, 0x188(r1)
+;   ld r27, 0x180(r1)
+;   ld r28, 0x178(r1)
+;   ld r29, 0x170(r1)
+;   ld r30, 0x168(r1)
+;   ld r31, 0x160(r1)
+;   lfd f14, 0x158(r1)
+;   lfd f15, 0x150(r1)
+;   lfd f16, 0x148(r1)
+;   lfd f17, 0x140(r1)
+;   lfd f18, 0x138(r1)
+;   lfd f19, 0x130(r1)
+;   lfd f20, 0x128(r1)
+;   lfd f21, 0x120(r1)
+;   lfd f22, 0x118(r1)
+;   lfd f23, 0x110(r1)
+;   lfd f24, 0x108(r1)
+;   lfd f25, 0x100(r1)
+;   lfd f26, 0xf8(r1)
+;   lfd f27, 0xf0(r1)
+;   lfd f28, 0xe8(r1)
+;   lfd f29, 0xe0(r1)
+;   lfd f30, 0xd8(r1)
+;   lfd f31, 0xd0(r1)
+;   li r0, 0xc0
+;   lxvx v20, r1, r0
+;   li r0, 0xb0
+;   lxvx v21, r1, r0
+;   li r0, 0xa0
+;   lxvx v22, r1, r0
+;   li r0, 0x90
+;   lxvx v23, r1, r0
+;   li r0, 0x80
+;   lxvx v24, r1, r0
+;   li r0, 0x70
+;   lxvx v25, r1, r0
+;   li r0, 0x60
+;   lxvx v26, r1, r0
+;   li r0, 0x50
+;   lxvx v27, r1, r0
+;   li r0, 0x40
+;   lxvx v28, r1, r0
+;   li r0, 0x30
+;   lxvx v29, r1, r0
+;   li r0, 0x20
+;   lxvx v30, r1, r0
+;   li r0, 0x10
+;   lxvx v31, r1, r0
+;   addi r1, r1, 0x1f0
+;   ld r0, 8(r1)
+;   mtlr r0
+;   ld r31, 0(r1)
+;   addi r1, r1, 0x10
+;   blr
+; block5: ; offset 0x348
+;   ori r3, r4, 0
+;   ld r14, 0x1e8(r1)
+;   ld r15, 0x1e0(r1)
+;   ld r16, 0x1d8(r1)
+;   ld r17, 0x1d0(r1)
+;   ld r18, 0x1c8(r1)
+;   ld r19, 0x1c0(r1)
+;   ld r20, 0x1b8(r1)
+;   ld r21, 0x1b0(r1)
+;   ld r22, 0x1a8(r1)
+;   ld r23, 0x1a0(r1)
+;   ld r24, 0x198(r1)
+;   ld r25, 0x190(r1)
+;   ld r26, 0x188(r1)
+;   ld r27, 0x180(r1)
+;   ld r28, 0x178(r1)
+;   ld r29, 0x170(r1)
+;   ld r30, 0x168(r1)
+;   ld r31, 0x160(r1)
+;   lfd f14, 0x158(r1)
+;   lfd f15, 0x150(r1)
+;   lfd f16, 0x148(r1)
+;   lfd f17, 0x140(r1)
+;   lfd f18, 0x138(r1)
+;   lfd f19, 0x130(r1)
+;   lfd f20, 0x128(r1)
+;   lfd f21, 0x120(r1)
+;   lfd f22, 0x118(r1)
+;   lfd f23, 0x110(r1)
+;   lfd f24, 0x108(r1)
+;   lfd f25, 0x100(r1)
+;   lfd f26, 0xf8(r1)
+;   lfd f27, 0xf0(r1)
+;   lfd f28, 0xe8(r1)
+;   lfd f29, 0xe0(r1)
+;   lfd f30, 0xd8(r1)
+;   lfd f31, 0xd0(r1)
+;   li r0, 0xc0
+;   lxvx v20, r1, r0
+;   li r0, 0xb0
+;   lxvx v21, r1, r0
+;   li r0, 0xa0
+;   lxvx v22, r1, r0
+;   li r0, 0x90
+;   lxvx v23, r1, r0
+;   li r0, 0x80
+;   lxvx v24, r1, r0
+;   li r0, 0x70
+;   lxvx v25, r1, r0
+;   li r0, 0x60
+;   lxvx v26, r1, r0
+;   li r0, 0x50
+;   lxvx v27, r1, r0
+;   li r0, 0x40
+;   lxvx v28, r1, r0
+;   li r0, 0x30
+;   lxvx v29, r1, r0
+;   li r0, 0x20
+;   lxvx v30, r1, r0
+;   li r0, 0x10
+;   lxvx v31, r1, r0
+;   addi r1, r1, 0x1f0
+;   ld r0, 8(r1)
+;   mtlr r0
+;   ld r31, 0(r1)
+;   addi r1, r1, 0x10
+;   blr
+

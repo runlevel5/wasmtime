@@ -1833,6 +1833,11 @@
         (shifted Reg (vec_alu_rrr (VecAluOp.Shl) cross c32 $I64X2)))
     (output_reg (vec_alu_rrr (VecAluOp.Add) lo shifted $I64X2))))
 
+;; POWER10 has the doubleword multiply the sequence above builds.
+(rule 6 (lower (imul $I64X2 x y))
+  (if-let true (has_isa_3_1))
+  (output_reg (vec_alu_rrr (VecAluOp.MulLow) (put_in_reg x) (put_in_reg y) $I64X2)))
+
 ;;;; Vector high-half multiply ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
 ;; The even/odd multiplies give full double-width products of alternate
@@ -1860,6 +1865,31 @@
   (output_reg (mulhi_i32x4
                 (vec_alu_rrr (VecAluOp.MulOddU) (put_in_reg x) (put_in_reg y) $I32X4)
                 (vec_alu_rrr (VecAluOp.MulEvenU) (put_in_reg x) (put_in_reg y) $I32X4))))
+
+;; POWER10 multiplies high halves per lane directly, at word and
+;; doubleword width. That replaces the word sequence above, and is the
+;; only lowering at doubleword width: before ISA 3.1 there is no
+;; doubleword product to take the high half of. The instructions are
+;; per-lane, so a 64-bit vector just carries garbage in its unused
+;; lanes.
+(rule 6 (lower (smulhi $I32X4 x y))
+  (if-let true (has_isa_3_1))
+  (output_reg (vec_alu_rrr (VecAluOp.MulHiS) (put_in_reg x) (put_in_reg y) $I32X4)))
+(rule 6 (lower (umulhi $I32X4 x y))
+  (if-let true (has_isa_3_1))
+  (output_reg (vec_alu_rrr (VecAluOp.MulHiU) (put_in_reg x) (put_in_reg y) $I32X4)))
+(rule 6 (lower (smulhi $I32X2 x y))
+  (if-let true (has_isa_3_1))
+  (output_reg (vec_alu_rrr (VecAluOp.MulHiS) (put_in_reg x) (put_in_reg y) $I32X4)))
+(rule 6 (lower (umulhi $I32X2 x y))
+  (if-let true (has_isa_3_1))
+  (output_reg (vec_alu_rrr (VecAluOp.MulHiU) (put_in_reg x) (put_in_reg y) $I32X4)))
+(rule 6 (lower (smulhi $I64X2 x y))
+  (if-let true (has_isa_3_1))
+  (output_reg (vec_alu_rrr (VecAluOp.MulHiS) (put_in_reg x) (put_in_reg y) $I64X2)))
+(rule 6 (lower (umulhi $I64X2 x y))
+  (if-let true (has_isa_3_1))
+  (output_reg (vec_alu_rrr (VecAluOp.MulHiU) (put_in_reg x) (put_in_reg y) $I64X2)))
 
 ;; At the narrower widths there is no merge for the needed granularity,
 ;; so the products are first interleaved back into source order with the

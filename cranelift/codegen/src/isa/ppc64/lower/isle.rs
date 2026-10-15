@@ -236,6 +236,10 @@ impl generated_code::Context for Ppc64IsleContext<'_, '_, MInst, Ppc64Backend> {
         ty.lane_bits() > 8
     }
 
+    fn has_isa_3_1(&mut self) -> bool {
+        self.backend.isa_flags.has_isa_3_1()
+    }
+
     /// Build the `vbpermq` index vector that gathers every lane's sign
     /// bit into the low halfword, least-significant bit for lane 0.
     ///

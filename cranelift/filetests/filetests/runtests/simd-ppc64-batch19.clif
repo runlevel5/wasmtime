@@ -2,6 +2,7 @@ test interpret
 test run
 target powerpc64le
 target powerpc64le has_isa_3_0
+target powerpc64le has_isa_3_0 has_isa_3_1
 
 ;; 128-bit lowerings whose derivation is non-obvious and which no
 ;; upstream runtest reaches on this target. Expectations are computed

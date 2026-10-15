@@ -164,6 +164,15 @@ fn vx_xo(op: VecAluOp, ty: Type) -> u32 {
     if matches!(op, VecAluOp::MulWord) {
         assert_eq!(lane, 32, "vmuluwm is a word-lane multiply");
     }
+    if matches!(op, VecAluOp::MulLow) {
+        assert_eq!(lane, 64, "vmulld is a doubleword-lane multiply");
+    }
+    if matches!(op, VecAluOp::MulHiS | VecAluOp::MulHiU) {
+        assert!(
+            lane >= 32,
+            "vmulh{{s,u}} exist for words and doublewords only"
+        );
+    }
     if matches!(
         op,
         VecAluOp::PackSS | VecAluOp::PackSU | VecAluOp::PackUU
@@ -232,6 +241,11 @@ fn vx_xo(op: VecAluOp, ty: Type) -> u32 {
         VecAluOp::Rotl => [4, 68, 132, 196],
         // Lane-width-independent: the index vector says which bits.
         VecAluOp::BitPermQ => [1356, 1356, 1356, 1356],
+        // ISA 3.1. `vmulld` is doubleword-only (word is `vmuluwm`);
+        // the high-half multiplies exist for word and doubleword.
+        VecAluOp::MulLow => [0, 0, 0, 457],
+        VecAluOp::MulHiS => [0, 0, 905, 969],
+        VecAluOp::MulHiU => [0, 0, 649, 713],
         VecAluOp::And
         | VecAluOp::Or
         | VecAluOp::Xor
@@ -489,6 +503,27 @@ fn return_call_emit_impl<T>(
 }
 
 /// Emit `cmpdi`/`cmpwi` of `ra` against a signed 16-bit immediate, into cr0.
+/// Emit an ISA 3.1 prefixed instruction, returning the offset of its
+/// prefix word (the CIA that a PC-relative displacement is measured
+/// from).
+///
+/// A prefixed instruction must not cross a 64-byte boundary -- doing so
+/// raises an alignment interrupt -- so a `nop` is inserted when the
+/// prefix would land in the last word of a block. That reasoning about
+/// offsets is only sound if the function itself starts 64-byte aligned,
+/// so the buffer's alignment is raised as well. Only functions that
+/// actually use a prefixed instruction pay for that.
+fn emit_prefixed(sink: &mut MachBuffer<Inst>, (prefix, suffix): (u32, u32)) -> CodeOffset {
+    sink.set_log2_min_function_alignment(6);
+    if sink.cur_offset() % 64 == 60 {
+        sink.put4(NOP_INSTRUCTION);
+    }
+    let at = sink.cur_offset();
+    sink.put4(prefix);
+    sink.put4(suffix);
+    at
+}
+
 fn emit_cmpi(sink: &mut MachBuffer<Inst>, ra: u32, imm: i16, is_64: bool) {
     sink.put4(enc_cmpi(11, 0, u32::from(is_64), ra, imm as u16));
 }
@@ -893,15 +928,23 @@ impl MachInstEmit for Inst {
                 emit_b_to_label(sink, default_target);
                 sink.bind_label(compute, &mut state.ctrl_plane);
 
-                // Read the PC, then index into the table that follows.
-                // `bcl` leaves LR pointing at the `mflr`, and the five
-                // instructions after it plus the `mflr` itself occupy the
-                // 24 bytes before the table.
-                sink.put4(BCL_20_31_PLUS4);
-                sink.put4(enc_mflr(addr));
-                sink.put4(enc_md(ext, ext, 2, 61, 1)); // sldi ext, ext, 2
-                sink.put4(enc_xo(addr, addr, ext, 266)); // add addr, addr, ext
-                sink.put4(enc_d(14, addr, addr, 24)); // addi addr, addr, 24
+                if emit_info.isa_flags.has_isa_3_1() {
+                    // The table starts 24 bytes after the `paddi`: its own
+                    // eight bytes plus the four instructions below.
+                    emit_prefixed(sink, enc_paddi_pcrel(addr, 24));
+                    sink.put4(enc_md(ext, ext, 2, 61, 1)); // sldi ext, ext, 2
+                    sink.put4(enc_xo(addr, addr, ext, 266)); // add addr, addr, ext
+                } else {
+                    // Read the PC, then index into the table that follows.
+                    // `bcl` leaves LR pointing at the `mflr`, and the five
+                    // instructions after it plus the `mflr` itself occupy
+                    // the 24 bytes before the table.
+                    sink.put4(BCL_20_31_PLUS4);
+                    sink.put4(enc_mflr(addr));
+                    sink.put4(enc_md(ext, ext, 2, 61, 1)); // sldi ext, ext, 2
+                    sink.put4(enc_xo(addr, addr, ext, 266)); // add addr, addr, ext
+                    sink.put4(enc_d(14, addr, addr, 24)); // addi addr, addr, 24
+                }
                 sink.put4(enc_mtctr(addr));
                 sink.put4(enc_bctr(false));
 
@@ -1679,6 +1722,13 @@ impl MachInstEmit for Inst {
                     VecAluOp::Nor => enc_xx3(d, a, b, 162),
                     VecAluOp::AndC => enc_xx3(d, a, b, 138),
                     _ => {
+                        debug_assert!(
+                            !matches!(
+                                op,
+                                VecAluOp::MulLow | VecAluOp::MulHiS | VecAluOp::MulHiU
+                            ) || emit_info.isa_flags.has_isa_3_1(),
+                            "{op:?} is an ISA 3.1 instruction"
+                        );
                         // VMX forms, VR numbers only.
                         let (d, a, b) = (d - 32, a - 32, b - 32);
                         enc_vx(d, a, b, vx_xo(op, ty))
@@ -2072,9 +2122,16 @@ impl MachInstEmit for Inst {
                 // calls), so the bcl trick is safe. The 8-byte island
                 // carries an Abs8 relocation.
                 let rd = reg_num(rd.to_reg());
-                sink.put4(BCL_20_31_PLUS4);
-                sink.put4(enc_mflr(rd));
-                sink.put4(enc_ds(58, rd, rd, 12, 0)); // ld rd, 12(rd)
+                if emit_info.isa_flags.has_isa_3_1() {
+                    // pld rd, 12(pc) ; b $+12 ; .quad <sym+offset>
+                    // -- the literal sits 12 bytes past the prefix, and
+                    // LR is left alone.
+                    emit_prefixed(sink, enc_pld_pcrel(rd, 12));
+                } else {
+                    sink.put4(BCL_20_31_PLUS4);
+                    sink.put4(enc_mflr(rd));
+                    sink.put4(enc_ds(58, rd, rd, 12, 0)); // ld rd, 12(rd)
+                }
                 sink.put4(enc_b(12, false)); // skip the literal
                 sink.add_reloc(Reloc::Abs8, &**name, *offset);
                 sink.put8(0);
@@ -2092,12 +2149,19 @@ impl MachInstEmit for Inst {
                 // is patched with the label's offset from that point once
                 // it is known. LR is dead here, as at LoadExtName.
                 let rd = reg_num(rd.to_reg());
-                sink.put4(BCL_20_31_PLUS4);
-                sink.put4(enc_mflr(rd));
-                let hi_lo_off = sink.cur_offset();
-                sink.use_label_at_offset(hi_lo_off, label, LabelUse::PCRelHiLo);
-                sink.put4(enc_d(15, rd, rd, 0)); // addis rd, rd, 0
-                sink.put4(enc_d(14, rd, rd, 0)); // addi rd, rd, 0
+                if emit_info.isa_flags.has_isa_3_1() {
+                    // paddi rd, 0, <label - here>, 1, patched once the
+                    // label is bound.
+                    let at = emit_prefixed(sink, enc_paddi_pcrel(rd, 0));
+                    sink.use_label_at_offset(at, label, LabelUse::PCRel34);
+                } else {
+                    sink.put4(BCL_20_31_PLUS4);
+                    sink.put4(enc_mflr(rd));
+                    let hi_lo_off = sink.cur_offset();
+                    sink.use_label_at_offset(hi_lo_off, label, LabelUse::PCRelHiLo);
+                    sink.put4(enc_d(15, rd, rd, 0)); // addis rd, rd, 0
+                    sink.put4(enc_d(14, rd, rd, 0)); // addi rd, rd, 0
+                }
             }
 
             &Inst::Mflr { rd } => sink.put4(enc_mflr(reg_num(rd.to_reg()))),
@@ -2128,5 +2192,28 @@ impl MachInstEmit for Inst {
 
     fn pretty_print_inst(&self, state: &mut Self::State) -> String {
         self.print_with_state(state)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn prefixed_instructions_never_cross_64_bytes() {
+        // A prefix that would land in the last word of a 64-byte block
+        // is pushed into the next block by one `nop`; anywhere else it
+        // is emitted in place.
+        for words in 0..32u32 {
+            let mut sink = MachBuffer::<Inst>::new();
+            for _ in 0..words {
+                sink.put4(NOP_INSTRUCTION);
+            }
+            let at = emit_prefixed(&mut sink, enc_paddi_pcrel(3, 0));
+            let expected = if words % 16 == 15 { words * 4 + 4 } else { words * 4 };
+            assert_eq!(at, expected, "after {words} words");
+            assert_eq!(at / 64, (at + 7) / 64, "prefix at {at} crosses a block");
+            assert_eq!(sink.cur_offset(), at + 8);
+        }
     }
 }

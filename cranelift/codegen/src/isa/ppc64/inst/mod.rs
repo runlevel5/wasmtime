@@ -1061,6 +1061,9 @@ impl Inst {
                     VecAluOp::MergeEvenWord => "vmrgew",
                     VecAluOp::Rotl => "vrl",
                     VecAluOp::BitPermQ => "vbpermq",
+                    VecAluOp::MulLow => "vmull",
+                    VecAluOp::MulHiS => "vmulhs",
+                    VecAluOp::MulHiU => "vmulhu",
                     VecAluOp::And => "xxland",
                     VecAluOp::Or => "xxlor",
                     VecAluOp::Xor => "xxlxor",
@@ -1278,6 +1281,11 @@ pub enum LabelUse {
     /// instruction 4 bytes before the pair, where a `bcl 20,31,$+4;
     /// mflr` sequence read the PC) to a register. Range ±2 GiB.
     PCRelHiLo,
+    /// An ISA 3.1 prefixed `paddi` with R=1, whose 34-bit displacement
+    /// (split 18/16 across the prefix and suffix words) is the label's
+    /// offset from the prefix word itself. The architecture allows
+    /// ±8 GiB; offsets within a function are limited to ±2 GiB here.
+    PCRel34,
 }
 
 impl MachInstLabelUse for LabelUse {
@@ -1288,7 +1296,7 @@ impl MachInstLabelUse for LabelUse {
         match self {
             LabelUse::Branch26 => (1 << 25) - 4,
             LabelUse::Branch16 => (1 << 15) - 4,
-            LabelUse::PCRelHiLo => i32::MAX as CodeOffset - 4,
+            LabelUse::PCRelHiLo | LabelUse::PCRel34 => i32::MAX as CodeOffset - 4,
         }
     }
 
@@ -1296,13 +1304,13 @@ impl MachInstLabelUse for LabelUse {
         match self {
             LabelUse::Branch26 => 1 << 25,
             LabelUse::Branch16 => 1 << 15,
-            LabelUse::PCRelHiLo => 1 << 31,
+            LabelUse::PCRelHiLo | LabelUse::PCRel34 => 1 << 31,
         }
     }
 
     fn patch_size(self) -> CodeOffset {
         match self {
-            LabelUse::PCRelHiLo => 8,
+            LabelUse::PCRelHiLo | LabelUse::PCRel34 => 8,
             _ => 4,
         }
     }
@@ -1327,11 +1335,20 @@ impl MachInstLabelUse for LabelUse {
             buffer[4..8].copy_from_slice(&(addi | u32::from(lo as u16)).to_le_bytes());
             return;
         }
+        if self == LabelUse::PCRel34 {
+            let prefix = u32::from_le_bytes(buffer[0..4].try_into().unwrap());
+            let suffix = u32::from_le_bytes(buffer[4..8].try_into().unwrap());
+            let hi = ((offset >> 16) as u32) & 0x3_FFFF;
+            let lo = (offset as u32) & 0xFFFF;
+            buffer[0..4].copy_from_slice(&((prefix & !0x3_FFFF) | hi).to_le_bytes());
+            buffer[4..8].copy_from_slice(&((suffix & !0xFFFF) | lo).to_le_bytes());
+            return;
+        }
         let insn = u32::from_le_bytes(buffer[0..4].try_into().unwrap());
         let field_mask = match self {
             LabelUse::Branch26 => 0x03FF_FFFC,
             LabelUse::Branch16 => 0x0000_FFFC,
-            LabelUse::PCRelHiLo => unreachable!(),
+            LabelUse::PCRelHiLo | LabelUse::PCRel34 => unreachable!(),
         };
         let patched = (insn & !field_mask) | ((offset as u32) & field_mask);
         buffer[0..4].copy_from_slice(&patched.to_le_bytes());
@@ -1339,7 +1356,7 @@ impl MachInstLabelUse for LabelUse {
 
     fn supports_veneer(self) -> bool {
         match self {
-            LabelUse::Branch26 | LabelUse::PCRelHiLo => false,
+            LabelUse::Branch26 | LabelUse::PCRelHiLo | LabelUse::PCRel34 => false,
             LabelUse::Branch16 => true,
         }
     }
@@ -1360,7 +1377,7 @@ impl MachInstLabelUse for LabelUse {
                 buffer[0..4].copy_from_slice(&enc_b(0, false).to_le_bytes());
                 (veneer_offset, LabelUse::Branch26)
             }
-            LabelUse::Branch26 | LabelUse::PCRelHiLo => unreachable!(),
+            LabelUse::Branch26 | LabelUse::PCRelHiLo | LabelUse::PCRel34 => unreachable!(),
         }
     }
 

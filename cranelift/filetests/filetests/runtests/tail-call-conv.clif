@@ -11,6 +11,7 @@ target riscv64
 target riscv64 has_c has_zcb
 target s390x
 target powerpc64le
+target powerpc64le has_isa_3_0 has_isa_3_1
 
 ;; Test the `tail` calling convention with non-tail calls.
 

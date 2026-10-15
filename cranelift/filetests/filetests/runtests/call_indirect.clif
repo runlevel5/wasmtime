@@ -12,6 +12,7 @@ target pulley32be
 target pulley64
 target pulley64be
 target powerpc64le
+target powerpc64le has_isa_3_0 has_isa_3_1
 
 
 function %callee_indirect(i64) -> i64 {

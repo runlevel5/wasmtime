@@ -220,6 +220,15 @@
     ;; into the low halfword. Lane-width-independent -- the indices say
     ;; everything -- so the lowering rules pass any type.
     (BitPermQ)
+    ;; ISA 3.1 (POWER10) only; the lowering rules gate on
+    ;; `has_isa_3_1`. `vmulld`: doubleword-lane multiply, low half.
+    ;; Doubleword only.
+    (MulLow)
+    ;; `vmulhs{w,d}` / `vmulhu{w,d}`: the high half of each lane's
+    ;; product. Per-lane, so free of the even/odd lane-order inversion.
+    ;; Word and doubleword only.
+    (MulHiS)
+    (MulHiU)
 
 ))
 
@@ -874,7 +883,8 @@
     ;; mflr rd; ld rd, 12(rd); b +12; .quad sym` sequence: the 8-byte
     ;; island carries an Abs8 relocation, which every object/JIT consumer
     ;; already knows how to process. This costs an LR clobber, which is
-    ;; fine: LR is dead between the prologue and any call.
+    ;; fine: LR is dead between the prologue and any call. With ISA 3.1
+    ;; the `bcl`/`mflr`/`ld` become one PC-relative `pld`.
     (LoadExtName
       (rd WritableReg)
       (name BoxExternalName)
@@ -920,7 +930,8 @@
     ;; Materialize the address of a label (e.g. an exception handler),
     ;; via `bcl 20,31,$+4; mflr rd; addis rd, rd, ha; addi rd, rd, lo`
     ;; with the hi/lo pair patched once the label is bound. Pre-POWER10
-    ;; PPC has no direct PC-relative address computation.
+    ;; PPC has no direct PC-relative address computation; with ISA 3.1
+    ;; this is a single prefixed `paddi` (R=1), patched the same way.
     (LabelAddress
       (rd WritableReg)
       (label MachLabel))
@@ -1317,6 +1328,12 @@
 ;; pack bytes into.
 (decl pure vec_lanes_over_8 (Type) bool)
 (extern constructor vec_lanes_over_8 vec_lanes_over_8)
+
+;; Whether the target implements Power ISA 3.1 (POWER10). Rules that
+;; use an ISA 3.1 instruction gate on this and sit at a higher priority
+;; than the POWER8 sequence they replace.
+(decl pure has_isa_3_1 () bool)
+(extern constructor has_isa_3_1 has_isa_3_1)
 
 (decl pure vconst_lo64 (u128) u64)
 (extern constructor vconst_lo64 vconst_lo64)
