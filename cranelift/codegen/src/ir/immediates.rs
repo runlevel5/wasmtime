@@ -686,24 +686,48 @@ macro_rules! ieee_float {
                 }
 
                 /// Returns the smallest integer greater than or equal to `self`.
+                ///
+                /// A NaN input produces a quiet NaN; see [`Self::quieted`].
                 pub fn ceil(self) -> Self {
-                    Self::with_float(Libm::<$float_ty>::ceil(self.$as_float()))
+                    Self::with_float(Libm::<$float_ty>::ceil(self.$as_float())).quieted()
                 }
 
                 /// Returns the largest integer less than or equal to `self`.
+                ///
+                /// A NaN input produces a quiet NaN; see [`Self::quieted`].
                 pub fn floor(self) -> Self {
-                    Self::with_float(Libm::<$float_ty>::floor(self.$as_float()))
+                    Self::with_float(Libm::<$float_ty>::floor(self.$as_float())).quieted()
                 }
 
                 /// Returns the integer part of `self`. This means that non-integer numbers are always truncated towards zero.
+                ///
+                /// A NaN input produces a quiet NaN; see [`Self::quieted`].
                 pub fn trunc(self) -> Self {
-                    Self::with_float(Libm::<$float_ty>::trunc(self.$as_float()))
+                    Self::with_float(Libm::<$float_ty>::trunc(self.$as_float())).quieted()
                 }
 
                 /// Returns the nearest integer to `self`. Rounds half-way cases to the number
                 /// with an even least significant digit.
+                ///
+                /// A NaN input produces a quiet NaN; see [`Self::quieted`].
                 pub fn round_ties_even(self) -> Self {
-                    Self::with_float(Libm::<$float_ty>::roundeven(self.$as_float()))
+                    Self::with_float(Libm::<$float_ty>::roundeven(self.$as_float())).quieted()
+                }
+
+                /// Returns `self` with the quiet bit set if it is a NaN, keeping its
+                /// sign and payload, and `self` unchanged otherwise.
+                ///
+                /// IEEE 754 `roundToIntegral` and WebAssembly's rounding operators
+                /// both turn a signalling NaN into a quiet one, as hardware rounding
+                /// instructions do, but the software implementations above return a
+                /// NaN input unchanged. Setting the bit directly, rather than through
+                /// host float arithmetic, keeps the result identical on every host.
+                fn quieted(self) -> Self {
+                    if self.is_nan() {
+                        Self::with_bits(self.bits() | (1 << (Self::SIGNIFICAND_BITS - 1)))
+                    } else {
+                        self
+                    }
                 }
             )?
         }
@@ -1767,6 +1791,33 @@ mod tests {
             let out = Ieee16::from_f32_rne(input);
             assert!(out.is_nan(), "input = {input:e}");
         }
+    }
+
+    #[test]
+    fn rounding_quiets_nans() {
+        // A signalling NaN comes back quiet, keeping its sign and payload.
+        let snan32 = Ieee32::with_bits(0xff89_0000);
+        for out in [
+            snan32.ceil(),
+            snan32.floor(),
+            snan32.trunc(),
+            snan32.round_ties_even(),
+        ] {
+            assert_eq!(out.bits(), 0xffc9_0000);
+        }
+        let snan64 = Ieee64::with_bits(0x7ff0_0000_0000_1234);
+        for out in [
+            snan64.ceil(),
+            snan64.floor(),
+            snan64.trunc(),
+            snan64.round_ties_even(),
+        ] {
+            assert_eq!(out.bits(), 0x7ff8_0000_0000_1234);
+        }
+        // A quiet NaN and an ordinary value are untouched.
+        assert_eq!(Ieee32::with_bits(0x7fc0_0001).ceil().bits(), 0x7fc0_0001);
+        assert_eq!(Ieee32::with_float(1.5).ceil(), Ieee32::with_float(2.0));
+        assert_eq!(Ieee64::with_float(-1.5).trunc(), Ieee64::with_float(-1.0));
     }
 
     #[test]

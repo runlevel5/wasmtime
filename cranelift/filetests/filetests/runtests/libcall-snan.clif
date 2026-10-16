@@ -1,0 +1,65 @@
+test interpret
+test run
+target x86_64
+target aarch64
+
+;; A signalling NaN passed through a rounding libcall comes back as a
+;; quiet NaN with the same sign and payload, as IEEE 754 `roundToIntegral`
+;; and WebAssembly's rounding operators require. Native code and the
+;; interpreter used to disagree here: hardware rounding instructions
+;; (AArch64 `frintp`, POWER `xsrdpip`) quiet the NaN, while the software
+;; implementation behind the interpreter returned it unchanged.
+
+function %ceil_f32(f32) -> f32 {
+    fn0 = %CeilF32(f32) -> f32
+block0(v0: f32):
+    v1 = call fn0(v0)
+    return v1
+}
+; run: %ceil_f32(-sNaN:0x90000) == -NaN:0x90000
+; run: %ceil_f32(0x1.8p0) == 0x1.0p1
+
+function %floor_f32(f32) -> f32 {
+    fn0 = %FloorF32(f32) -> f32
+block0(v0: f32):
+    v1 = call fn0(v0)
+    return v1
+}
+; run: %floor_f32(-sNaN:0x90000) == -NaN:0x90000
+; run: %floor_f32(0x1.8p0) == 0x1.0p0
+
+function %trunc_f32(f32) -> f32 {
+    fn0 = %TruncF32(f32) -> f32
+block0(v0: f32):
+    v1 = call fn0(v0)
+    return v1
+}
+; run: %trunc_f32(-sNaN:0x90000) == -NaN:0x90000
+; run: %trunc_f32(-0x1.8p0) == -0x1.0p0
+
+function %ceil_f64(f64) -> f64 {
+    fn0 = %CeilF64(f64) -> f64
+block0(v0: f64):
+    v1 = call fn0(v0)
+    return v1
+}
+; run: %ceil_f64(+sNaN:0x1234) == +NaN:0x1234
+; run: %ceil_f64(0x1.8p0) == 0x1.0p1
+
+function %floor_f64(f64) -> f64 {
+    fn0 = %FloorF64(f64) -> f64
+block0(v0: f64):
+    v1 = call fn0(v0)
+    return v1
+}
+; run: %floor_f64(+sNaN:0x1234) == +NaN:0x1234
+; run: %floor_f64(0x1.8p0) == 0x1.0p0
+
+function %trunc_f64(f64) -> f64 {
+    fn0 = %TruncF64(f64) -> f64
+block0(v0: f64):
+    v1 = call fn0(v0)
+    return v1
+}
+; run: %trunc_f64(+sNaN:0x1234) == +NaN:0x1234
+; run: %trunc_f64(-0x1.8p0) == -0x1.0p0
