@@ -722,6 +722,15 @@ fn valid_for_target(isa: &dyn TargetIsa, op: Opcode, args: &[Type], rets: &[Type
                 ),
                 (Opcode::Umulhi | Opcode::Smulhi, &[I64X2, I64X2], _),
                 (Opcode::SqmulRoundSat, &[I32X4, I32X4], _),
+                // Scalar float `bitselect` is not lowered, as on the other
+                // backends. (f32 values live widened to double, so it is
+                // not a plain bitwise select either.)
+                (Opcode::Bitselect, &[_, _, _], &[F32 | F64]),
+                // The interpreter cannot bitcast between i128 and vectors,
+                // as on the other backends.
+                // https://github.com/bytecodealliance/wasmtime/issues/6104
+                (Opcode::Bitcast, &[I128], &[_]),
+                (Opcode::Bitcast, &[_], &[I128]),
             )
         }
 
@@ -1330,9 +1339,11 @@ where
         // Some backends have issues with unaligned atomics.
         // AArch64: https://github.com/bytecodealliance/wasmtime/issues/5483
         // RISCV: https://github.com/bytecodealliance/wasmtime/issues/5882
+        // PowerPC: `l*arx`/`st*cx.` raise an alignment interrupt (SIGBUS)
+        // on a misaligned address.
         let requires_aligned_atomics = matches!(
             self.isa.triple().architecture,
-            Architecture::Aarch64(_) | Architecture::Riscv64(_)
+            Architecture::Aarch64(_) | Architecture::Riscv64(_) | Architecture::Powerpc64le
         );
         let aligned = if is_atomic && requires_aligned_atomics {
             true
