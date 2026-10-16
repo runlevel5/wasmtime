@@ -1,0 +1,65 @@
+test interpret
+test run
+target powerpc64le
+target powerpc64le has_isa_3_0 has_isa_3_1
+
+;; A signalling NaN passed through a rounding libcall must come back
+;; exactly as the interpreter returns it. The native libcalls used to be
+;; `f32::ceil` and friends, which on POWER compile to a hardware rounding
+;; instruction that quiets the NaN, while the interpreter's software
+;; implementation returns it unchanged; differential fuzzing on POWER10
+;; reported that as a mismatch. Both now share one implementation.
+
+function %ceil_f32(f32) -> f32 {
+    fn0 = %CeilF32(f32) -> f32
+block0(v0: f32):
+    v1 = call fn0(v0)
+    return v1
+}
+; run: %ceil_f32(-sNaN:0x90000) == -sNaN:0x90000
+; run: %ceil_f32(0x1.8p0) == 0x1.0p1
+
+function %floor_f32(f32) -> f32 {
+    fn0 = %FloorF32(f32) -> f32
+block0(v0: f32):
+    v1 = call fn0(v0)
+    return v1
+}
+; run: %floor_f32(-sNaN:0x90000) == -sNaN:0x90000
+; run: %floor_f32(0x1.8p0) == 0x1.0p0
+
+function %trunc_f32(f32) -> f32 {
+    fn0 = %TruncF32(f32) -> f32
+block0(v0: f32):
+    v1 = call fn0(v0)
+    return v1
+}
+; run: %trunc_f32(-sNaN:0x90000) == -sNaN:0x90000
+; run: %trunc_f32(-0x1.8p0) == -0x1.0p0
+
+function %ceil_f64(f64) -> f64 {
+    fn0 = %CeilF64(f64) -> f64
+block0(v0: f64):
+    v1 = call fn0(v0)
+    return v1
+}
+; run: %ceil_f64(+sNaN:0x1234) == +sNaN:0x1234
+; run: %ceil_f64(0x1.8p0) == 0x1.0p1
+
+function %floor_f64(f64) -> f64 {
+    fn0 = %FloorF64(f64) -> f64
+block0(v0: f64):
+    v1 = call fn0(v0)
+    return v1
+}
+; run: %floor_f64(+sNaN:0x1234) == +sNaN:0x1234
+; run: %floor_f64(0x1.8p0) == 0x1.0p0
+
+function %trunc_f64(f64) -> f64 {
+    fn0 = %TruncF64(f64) -> f64
+block0(v0: f64):
+    v1 = call fn0(v0)
+    return v1
+}
+; run: %trunc_f64(+sNaN:0x1234) == +sNaN:0x1234
+; run: %trunc_f64(-0x1.8p0) == -0x1.0p0

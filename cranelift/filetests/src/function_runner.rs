@@ -2,6 +2,7 @@
 use anyhow::{Context as _, Result, anyhow};
 use core::mem;
 use cranelift::prelude::Imm64;
+use cranelift_codegen::ir::immediates::{Ieee32, Ieee64};
 use cranelift_codegen::cursor::{Cursor, FuncCursor};
 use cranelift_codegen::data_value::DataValue;
 use cranelift_codegen::ir::{
@@ -707,41 +708,47 @@ extern "C-unwind" fn __cranelift_throw(
 // This is important for differential fuzzing where manual invocations of
 // libcalls are expected to return the same result, so here they get identical
 // implementations.
+//
+// The rounding libcalls go through `Ieee32`/`Ieee64`, exactly as the
+// interpreter does, rather than through `f32::ceil` and friends: those
+// compile to a hardware rounding instruction on some hosts (`xsrdpip` on
+// POWER, `frintp` on AArch64) that quiets a signalling NaN, whereas the
+// software implementation returns it unchanged.
 fn lookup_libcall(name: &str) -> Option<*const u8> {
     match name {
         "ceil" => {
             extern "C" fn ceil(a: f64) -> f64 {
-                a.ceil()
+                Ieee64::with_float(a).ceil().as_f64()
             }
             Some(ceil as *const u8)
         }
         "ceilf" => {
             extern "C" fn ceilf(a: f32) -> f32 {
-                a.ceil()
+                Ieee32::with_float(a).ceil().as_f32()
             }
             Some(ceilf as *const u8)
         }
         "trunc" => {
             extern "C" fn trunc(a: f64) -> f64 {
-                a.trunc()
+                Ieee64::with_float(a).trunc().as_f64()
             }
             Some(trunc as *const u8)
         }
         "truncf" => {
             extern "C" fn truncf(a: f32) -> f32 {
-                a.trunc()
+                Ieee32::with_float(a).trunc().as_f32()
             }
             Some(truncf as *const u8)
         }
         "floor" => {
             extern "C" fn floor(a: f64) -> f64 {
-                a.floor()
+                Ieee64::with_float(a).floor().as_f64()
             }
             Some(floor as *const u8)
         }
         "floorf" => {
             extern "C" fn floorf(a: f32) -> f32 {
-                a.floor()
+                Ieee32::with_float(a).floor().as_f32()
             }
             Some(floorf as *const u8)
         }
