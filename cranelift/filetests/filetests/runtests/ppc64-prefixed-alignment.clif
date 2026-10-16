@@ -1,0 +1,1531 @@
+test interpret
+test run
+target powerpc64le has_isa_3_0 has_isa_3_1
+
+;; ISA 3.1 prefixed instructions must not cross a 64-byte boundary, so
+;; the emitter pads with a `nop` when one would start in the last word of
+;; a block. Each function below puts a different number of filler
+;; instructions (one per step, alternating `iadd` and `rotl` by a
+;; constant, so nothing folds) ahead of a `br_table` (`paddi` for the
+;; table address) or a `func_addr` (`pld`), sweeping the prefix across
+;; every word offset within a 64-byte block -- including the one that
+;; needs padding -- and executing each.
+
+function %callee(i64) -> i64 {
+block0(v0: i64):
+    v1 = iconst.i64 10
+    v2 = iadd v0, v1
+    return v2
+}
+
+function %br_table_0(i64, i64, i32) -> i64 {
+block0(v0: i64, v1: i64, v2: i32):
+    v3 = iconst.i64 1
+    br_table v2, block4, [block1, block2, block3]
+block1:
+    v101 = iconst.i64 1
+    v111 = iadd v0, v101
+    return v111
+block2:
+    v102 = iconst.i64 2
+    v112 = iadd v0, v102
+    return v112
+block3:
+    v103 = iconst.i64 3
+    v113 = iadd v0, v103
+    return v113
+block4:
+    v104 = iconst.i64 4
+    v114 = iadd v0, v104
+    return v114
+}
+
+; run: %br_table_0(81985529216486895, 4369, 0) == 81985529216486896
+; run: %br_table_0(81985529216486895, 4369, 1) == 81985529216486897
+; run: %br_table_0(81985529216486895, 4369, 2) == 81985529216486898
+; run: %br_table_0(81985529216486895, 4369, 3) == 81985529216486899
+; run: %br_table_0(81985529216486895, 4369, 99) == 81985529216486899
+
+function %func_addr_0(i64, i64) -> i64 {
+    fn0 = %callee(i64) -> i64
+
+block0(v0: i64, v1: i64):
+    v3 = iconst.i64 1
+    v200 = func_addr.i64 fn0
+    v201 = call_indirect sig0, v200(v0)
+    return v201
+}
+
+; run: %func_addr_0(81985529216486895, 4369) == 81985529216486905
+
+function %br_table_1(i64, i64, i32) -> i64 {
+block0(v0: i64, v1: i64, v2: i32):
+    v3 = iconst.i64 1
+    v10 = iadd v0, v1
+    br_table v2, block4, [block1, block2, block3]
+block1:
+    v101 = iconst.i64 1
+    v111 = iadd v10, v101
+    return v111
+block2:
+    v102 = iconst.i64 2
+    v112 = iadd v10, v102
+    return v112
+block3:
+    v103 = iconst.i64 3
+    v113 = iadd v10, v103
+    return v113
+block4:
+    v104 = iconst.i64 4
+    v114 = iadd v10, v104
+    return v114
+}
+
+; run: %br_table_1(81985529216486895, 4369, 0) == 81985529216491265
+; run: %br_table_1(81985529216486895, 4369, 1) == 81985529216491266
+; run: %br_table_1(81985529216486895, 4369, 2) == 81985529216491267
+; run: %br_table_1(81985529216486895, 4369, 3) == 81985529216491268
+; run: %br_table_1(81985529216486895, 4369, 99) == 81985529216491268
+
+function %func_addr_1(i64, i64) -> i64 {
+    fn0 = %callee(i64) -> i64
+
+block0(v0: i64, v1: i64):
+    v3 = iconst.i64 1
+    v10 = iadd v0, v1
+    v200 = func_addr.i64 fn0
+    v201 = call_indirect sig0, v200(v10)
+    return v201
+}
+
+; run: %func_addr_1(81985529216486895, 4369) == 81985529216491274
+
+function %br_table_2(i64, i64, i32) -> i64 {
+block0(v0: i64, v1: i64, v2: i32):
+    v3 = iconst.i64 1
+    v10 = iadd v0, v1
+    v11 = rotl v10, v3
+    br_table v2, block4, [block1, block2, block3]
+block1:
+    v101 = iconst.i64 1
+    v111 = iadd v11, v101
+    return v111
+block2:
+    v102 = iconst.i64 2
+    v112 = iadd v11, v102
+    return v112
+block3:
+    v103 = iconst.i64 3
+    v113 = iadd v11, v103
+    return v113
+block4:
+    v104 = iconst.i64 4
+    v114 = iadd v11, v104
+    return v114
+}
+
+; run: %br_table_2(81985529216486895, 4369, 0) == 163971058432982529
+; run: %br_table_2(81985529216486895, 4369, 1) == 163971058432982530
+; run: %br_table_2(81985529216486895, 4369, 2) == 163971058432982531
+; run: %br_table_2(81985529216486895, 4369, 3) == 163971058432982532
+; run: %br_table_2(81985529216486895, 4369, 99) == 163971058432982532
+
+function %func_addr_2(i64, i64) -> i64 {
+    fn0 = %callee(i64) -> i64
+
+block0(v0: i64, v1: i64):
+    v3 = iconst.i64 1
+    v10 = iadd v0, v1
+    v11 = rotl v10, v3
+    v200 = func_addr.i64 fn0
+    v201 = call_indirect sig0, v200(v11)
+    return v201
+}
+
+; run: %func_addr_2(81985529216486895, 4369) == 163971058432982538
+
+function %br_table_3(i64, i64, i32) -> i64 {
+block0(v0: i64, v1: i64, v2: i32):
+    v3 = iconst.i64 1
+    v10 = iadd v0, v1
+    v11 = rotl v10, v3
+    v12 = iadd v11, v1
+    br_table v2, block4, [block1, block2, block3]
+block1:
+    v101 = iconst.i64 1
+    v111 = iadd v12, v101
+    return v111
+block2:
+    v102 = iconst.i64 2
+    v112 = iadd v12, v102
+    return v112
+block3:
+    v103 = iconst.i64 3
+    v113 = iadd v12, v103
+    return v113
+block4:
+    v104 = iconst.i64 4
+    v114 = iadd v12, v104
+    return v114
+}
+
+; run: %br_table_3(81985529216486895, 4369, 0) == 163971058432986898
+; run: %br_table_3(81985529216486895, 4369, 1) == 163971058432986899
+; run: %br_table_3(81985529216486895, 4369, 2) == 163971058432986900
+; run: %br_table_3(81985529216486895, 4369, 3) == 163971058432986901
+; run: %br_table_3(81985529216486895, 4369, 99) == 163971058432986901
+
+function %func_addr_3(i64, i64) -> i64 {
+    fn0 = %callee(i64) -> i64
+
+block0(v0: i64, v1: i64):
+    v3 = iconst.i64 1
+    v10 = iadd v0, v1
+    v11 = rotl v10, v3
+    v12 = iadd v11, v1
+    v200 = func_addr.i64 fn0
+    v201 = call_indirect sig0, v200(v12)
+    return v201
+}
+
+; run: %func_addr_3(81985529216486895, 4369) == 163971058432986907
+
+function %br_table_4(i64, i64, i32) -> i64 {
+block0(v0: i64, v1: i64, v2: i32):
+    v3 = iconst.i64 1
+    v10 = iadd v0, v1
+    v11 = rotl v10, v3
+    v12 = iadd v11, v1
+    v13 = rotl v12, v3
+    br_table v2, block4, [block1, block2, block3]
+block1:
+    v101 = iconst.i64 1
+    v111 = iadd v13, v101
+    return v111
+block2:
+    v102 = iconst.i64 2
+    v112 = iadd v13, v102
+    return v112
+block3:
+    v103 = iconst.i64 3
+    v113 = iadd v13, v103
+    return v113
+block4:
+    v104 = iconst.i64 4
+    v114 = iadd v13, v104
+    return v114
+}
+
+; run: %br_table_4(81985529216486895, 4369, 0) == 327942116865973795
+; run: %br_table_4(81985529216486895, 4369, 1) == 327942116865973796
+; run: %br_table_4(81985529216486895, 4369, 2) == 327942116865973797
+; run: %br_table_4(81985529216486895, 4369, 3) == 327942116865973798
+; run: %br_table_4(81985529216486895, 4369, 99) == 327942116865973798
+
+function %func_addr_4(i64, i64) -> i64 {
+    fn0 = %callee(i64) -> i64
+
+block0(v0: i64, v1: i64):
+    v3 = iconst.i64 1
+    v10 = iadd v0, v1
+    v11 = rotl v10, v3
+    v12 = iadd v11, v1
+    v13 = rotl v12, v3
+    v200 = func_addr.i64 fn0
+    v201 = call_indirect sig0, v200(v13)
+    return v201
+}
+
+; run: %func_addr_4(81985529216486895, 4369) == 327942116865973804
+
+function %br_table_5(i64, i64, i32) -> i64 {
+block0(v0: i64, v1: i64, v2: i32):
+    v3 = iconst.i64 1
+    v10 = iadd v0, v1
+    v11 = rotl v10, v3
+    v12 = iadd v11, v1
+    v13 = rotl v12, v3
+    v14 = iadd v13, v1
+    br_table v2, block4, [block1, block2, block3]
+block1:
+    v101 = iconst.i64 1
+    v111 = iadd v14, v101
+    return v111
+block2:
+    v102 = iconst.i64 2
+    v112 = iadd v14, v102
+    return v112
+block3:
+    v103 = iconst.i64 3
+    v113 = iadd v14, v103
+    return v113
+block4:
+    v104 = iconst.i64 4
+    v114 = iadd v14, v104
+    return v114
+}
+
+; run: %br_table_5(81985529216486895, 4369, 0) == 327942116865978164
+; run: %br_table_5(81985529216486895, 4369, 1) == 327942116865978165
+; run: %br_table_5(81985529216486895, 4369, 2) == 327942116865978166
+; run: %br_table_5(81985529216486895, 4369, 3) == 327942116865978167
+; run: %br_table_5(81985529216486895, 4369, 99) == 327942116865978167
+
+function %func_addr_5(i64, i64) -> i64 {
+    fn0 = %callee(i64) -> i64
+
+block0(v0: i64, v1: i64):
+    v3 = iconst.i64 1
+    v10 = iadd v0, v1
+    v11 = rotl v10, v3
+    v12 = iadd v11, v1
+    v13 = rotl v12, v3
+    v14 = iadd v13, v1
+    v200 = func_addr.i64 fn0
+    v201 = call_indirect sig0, v200(v14)
+    return v201
+}
+
+; run: %func_addr_5(81985529216486895, 4369) == 327942116865978173
+
+function %br_table_6(i64, i64, i32) -> i64 {
+block0(v0: i64, v1: i64, v2: i32):
+    v3 = iconst.i64 1
+    v10 = iadd v0, v1
+    v11 = rotl v10, v3
+    v12 = iadd v11, v1
+    v13 = rotl v12, v3
+    v14 = iadd v13, v1
+    v15 = rotl v14, v3
+    br_table v2, block4, [block1, block2, block3]
+block1:
+    v101 = iconst.i64 1
+    v111 = iadd v15, v101
+    return v111
+block2:
+    v102 = iconst.i64 2
+    v112 = iadd v15, v102
+    return v112
+block3:
+    v103 = iconst.i64 3
+    v113 = iadd v15, v103
+    return v113
+block4:
+    v104 = iconst.i64 4
+    v114 = iadd v15, v104
+    return v114
+}
+
+; run: %br_table_6(81985529216486895, 4369, 0) == 655884233731956327
+; run: %br_table_6(81985529216486895, 4369, 1) == 655884233731956328
+; run: %br_table_6(81985529216486895, 4369, 2) == 655884233731956329
+; run: %br_table_6(81985529216486895, 4369, 3) == 655884233731956330
+; run: %br_table_6(81985529216486895, 4369, 99) == 655884233731956330
+
+function %func_addr_6(i64, i64) -> i64 {
+    fn0 = %callee(i64) -> i64
+
+block0(v0: i64, v1: i64):
+    v3 = iconst.i64 1
+    v10 = iadd v0, v1
+    v11 = rotl v10, v3
+    v12 = iadd v11, v1
+    v13 = rotl v12, v3
+    v14 = iadd v13, v1
+    v15 = rotl v14, v3
+    v200 = func_addr.i64 fn0
+    v201 = call_indirect sig0, v200(v15)
+    return v201
+}
+
+; run: %func_addr_6(81985529216486895, 4369) == 655884233731956336
+
+function %br_table_7(i64, i64, i32) -> i64 {
+block0(v0: i64, v1: i64, v2: i32):
+    v3 = iconst.i64 1
+    v10 = iadd v0, v1
+    v11 = rotl v10, v3
+    v12 = iadd v11, v1
+    v13 = rotl v12, v3
+    v14 = iadd v13, v1
+    v15 = rotl v14, v3
+    v16 = iadd v15, v1
+    br_table v2, block4, [block1, block2, block3]
+block1:
+    v101 = iconst.i64 1
+    v111 = iadd v16, v101
+    return v111
+block2:
+    v102 = iconst.i64 2
+    v112 = iadd v16, v102
+    return v112
+block3:
+    v103 = iconst.i64 3
+    v113 = iadd v16, v103
+    return v113
+block4:
+    v104 = iconst.i64 4
+    v114 = iadd v16, v104
+    return v114
+}
+
+; run: %br_table_7(81985529216486895, 4369, 0) == 655884233731960696
+; run: %br_table_7(81985529216486895, 4369, 1) == 655884233731960697
+; run: %br_table_7(81985529216486895, 4369, 2) == 655884233731960698
+; run: %br_table_7(81985529216486895, 4369, 3) == 655884233731960699
+; run: %br_table_7(81985529216486895, 4369, 99) == 655884233731960699
+
+function %func_addr_7(i64, i64) -> i64 {
+    fn0 = %callee(i64) -> i64
+
+block0(v0: i64, v1: i64):
+    v3 = iconst.i64 1
+    v10 = iadd v0, v1
+    v11 = rotl v10, v3
+    v12 = iadd v11, v1
+    v13 = rotl v12, v3
+    v14 = iadd v13, v1
+    v15 = rotl v14, v3
+    v16 = iadd v15, v1
+    v200 = func_addr.i64 fn0
+    v201 = call_indirect sig0, v200(v16)
+    return v201
+}
+
+; run: %func_addr_7(81985529216486895, 4369) == 655884233731960705
+
+function %br_table_8(i64, i64, i32) -> i64 {
+block0(v0: i64, v1: i64, v2: i32):
+    v3 = iconst.i64 1
+    v10 = iadd v0, v1
+    v11 = rotl v10, v3
+    v12 = iadd v11, v1
+    v13 = rotl v12, v3
+    v14 = iadd v13, v1
+    v15 = rotl v14, v3
+    v16 = iadd v15, v1
+    v17 = rotl v16, v3
+    br_table v2, block4, [block1, block2, block3]
+block1:
+    v101 = iconst.i64 1
+    v111 = iadd v17, v101
+    return v111
+block2:
+    v102 = iconst.i64 2
+    v112 = iadd v17, v102
+    return v112
+block3:
+    v103 = iconst.i64 3
+    v113 = iadd v17, v103
+    return v113
+block4:
+    v104 = iconst.i64 4
+    v114 = iadd v17, v104
+    return v114
+}
+
+; run: %br_table_8(81985529216486895, 4369, 0) == 1311768467463921391
+; run: %br_table_8(81985529216486895, 4369, 1) == 1311768467463921392
+; run: %br_table_8(81985529216486895, 4369, 2) == 1311768467463921393
+; run: %br_table_8(81985529216486895, 4369, 3) == 1311768467463921394
+; run: %br_table_8(81985529216486895, 4369, 99) == 1311768467463921394
+
+function %func_addr_8(i64, i64) -> i64 {
+    fn0 = %callee(i64) -> i64
+
+block0(v0: i64, v1: i64):
+    v3 = iconst.i64 1
+    v10 = iadd v0, v1
+    v11 = rotl v10, v3
+    v12 = iadd v11, v1
+    v13 = rotl v12, v3
+    v14 = iadd v13, v1
+    v15 = rotl v14, v3
+    v16 = iadd v15, v1
+    v17 = rotl v16, v3
+    v200 = func_addr.i64 fn0
+    v201 = call_indirect sig0, v200(v17)
+    return v201
+}
+
+; run: %func_addr_8(81985529216486895, 4369) == 1311768467463921400
+
+function %br_table_9(i64, i64, i32) -> i64 {
+block0(v0: i64, v1: i64, v2: i32):
+    v3 = iconst.i64 1
+    v10 = iadd v0, v1
+    v11 = rotl v10, v3
+    v12 = iadd v11, v1
+    v13 = rotl v12, v3
+    v14 = iadd v13, v1
+    v15 = rotl v14, v3
+    v16 = iadd v15, v1
+    v17 = rotl v16, v3
+    v18 = iadd v17, v1
+    br_table v2, block4, [block1, block2, block3]
+block1:
+    v101 = iconst.i64 1
+    v111 = iadd v18, v101
+    return v111
+block2:
+    v102 = iconst.i64 2
+    v112 = iadd v18, v102
+    return v112
+block3:
+    v103 = iconst.i64 3
+    v113 = iadd v18, v103
+    return v113
+block4:
+    v104 = iconst.i64 4
+    v114 = iadd v18, v104
+    return v114
+}
+
+; run: %br_table_9(81985529216486895, 4369, 0) == 1311768467463925760
+; run: %br_table_9(81985529216486895, 4369, 1) == 1311768467463925761
+; run: %br_table_9(81985529216486895, 4369, 2) == 1311768467463925762
+; run: %br_table_9(81985529216486895, 4369, 3) == 1311768467463925763
+; run: %br_table_9(81985529216486895, 4369, 99) == 1311768467463925763
+
+function %func_addr_9(i64, i64) -> i64 {
+    fn0 = %callee(i64) -> i64
+
+block0(v0: i64, v1: i64):
+    v3 = iconst.i64 1
+    v10 = iadd v0, v1
+    v11 = rotl v10, v3
+    v12 = iadd v11, v1
+    v13 = rotl v12, v3
+    v14 = iadd v13, v1
+    v15 = rotl v14, v3
+    v16 = iadd v15, v1
+    v17 = rotl v16, v3
+    v18 = iadd v17, v1
+    v200 = func_addr.i64 fn0
+    v201 = call_indirect sig0, v200(v18)
+    return v201
+}
+
+; run: %func_addr_9(81985529216486895, 4369) == 1311768467463925769
+
+function %br_table_10(i64, i64, i32) -> i64 {
+block0(v0: i64, v1: i64, v2: i32):
+    v3 = iconst.i64 1
+    v10 = iadd v0, v1
+    v11 = rotl v10, v3
+    v12 = iadd v11, v1
+    v13 = rotl v12, v3
+    v14 = iadd v13, v1
+    v15 = rotl v14, v3
+    v16 = iadd v15, v1
+    v17 = rotl v16, v3
+    v18 = iadd v17, v1
+    v19 = rotl v18, v3
+    br_table v2, block4, [block1, block2, block3]
+block1:
+    v101 = iconst.i64 1
+    v111 = iadd v19, v101
+    return v111
+block2:
+    v102 = iconst.i64 2
+    v112 = iadd v19, v102
+    return v112
+block3:
+    v103 = iconst.i64 3
+    v113 = iadd v19, v103
+    return v113
+block4:
+    v104 = iconst.i64 4
+    v114 = iadd v19, v104
+    return v114
+}
+
+; run: %br_table_10(81985529216486895, 4369, 0) == 2623536934927851519
+; run: %br_table_10(81985529216486895, 4369, 1) == 2623536934927851520
+; run: %br_table_10(81985529216486895, 4369, 2) == 2623536934927851521
+; run: %br_table_10(81985529216486895, 4369, 3) == 2623536934927851522
+; run: %br_table_10(81985529216486895, 4369, 99) == 2623536934927851522
+
+function %func_addr_10(i64, i64) -> i64 {
+    fn0 = %callee(i64) -> i64
+
+block0(v0: i64, v1: i64):
+    v3 = iconst.i64 1
+    v10 = iadd v0, v1
+    v11 = rotl v10, v3
+    v12 = iadd v11, v1
+    v13 = rotl v12, v3
+    v14 = iadd v13, v1
+    v15 = rotl v14, v3
+    v16 = iadd v15, v1
+    v17 = rotl v16, v3
+    v18 = iadd v17, v1
+    v19 = rotl v18, v3
+    v200 = func_addr.i64 fn0
+    v201 = call_indirect sig0, v200(v19)
+    return v201
+}
+
+; run: %func_addr_10(81985529216486895, 4369) == 2623536934927851528
+
+function %br_table_11(i64, i64, i32) -> i64 {
+block0(v0: i64, v1: i64, v2: i32):
+    v3 = iconst.i64 1
+    v10 = iadd v0, v1
+    v11 = rotl v10, v3
+    v12 = iadd v11, v1
+    v13 = rotl v12, v3
+    v14 = iadd v13, v1
+    v15 = rotl v14, v3
+    v16 = iadd v15, v1
+    v17 = rotl v16, v3
+    v18 = iadd v17, v1
+    v19 = rotl v18, v3
+    v20 = iadd v19, v1
+    br_table v2, block4, [block1, block2, block3]
+block1:
+    v101 = iconst.i64 1
+    v111 = iadd v20, v101
+    return v111
+block2:
+    v102 = iconst.i64 2
+    v112 = iadd v20, v102
+    return v112
+block3:
+    v103 = iconst.i64 3
+    v113 = iadd v20, v103
+    return v113
+block4:
+    v104 = iconst.i64 4
+    v114 = iadd v20, v104
+    return v114
+}
+
+; run: %br_table_11(81985529216486895, 4369, 0) == 2623536934927855888
+; run: %br_table_11(81985529216486895, 4369, 1) == 2623536934927855889
+; run: %br_table_11(81985529216486895, 4369, 2) == 2623536934927855890
+; run: %br_table_11(81985529216486895, 4369, 3) == 2623536934927855891
+; run: %br_table_11(81985529216486895, 4369, 99) == 2623536934927855891
+
+function %func_addr_11(i64, i64) -> i64 {
+    fn0 = %callee(i64) -> i64
+
+block0(v0: i64, v1: i64):
+    v3 = iconst.i64 1
+    v10 = iadd v0, v1
+    v11 = rotl v10, v3
+    v12 = iadd v11, v1
+    v13 = rotl v12, v3
+    v14 = iadd v13, v1
+    v15 = rotl v14, v3
+    v16 = iadd v15, v1
+    v17 = rotl v16, v3
+    v18 = iadd v17, v1
+    v19 = rotl v18, v3
+    v20 = iadd v19, v1
+    v200 = func_addr.i64 fn0
+    v201 = call_indirect sig0, v200(v20)
+    return v201
+}
+
+; run: %func_addr_11(81985529216486895, 4369) == 2623536934927855897
+
+function %br_table_12(i64, i64, i32) -> i64 {
+block0(v0: i64, v1: i64, v2: i32):
+    v3 = iconst.i64 1
+    v10 = iadd v0, v1
+    v11 = rotl v10, v3
+    v12 = iadd v11, v1
+    v13 = rotl v12, v3
+    v14 = iadd v13, v1
+    v15 = rotl v14, v3
+    v16 = iadd v15, v1
+    v17 = rotl v16, v3
+    v18 = iadd v17, v1
+    v19 = rotl v18, v3
+    v20 = iadd v19, v1
+    v21 = rotl v20, v3
+    br_table v2, block4, [block1, block2, block3]
+block1:
+    v101 = iconst.i64 1
+    v111 = iadd v21, v101
+    return v111
+block2:
+    v102 = iconst.i64 2
+    v112 = iadd v21, v102
+    return v112
+block3:
+    v103 = iconst.i64 3
+    v113 = iadd v21, v103
+    return v113
+block4:
+    v104 = iconst.i64 4
+    v114 = iadd v21, v104
+    return v114
+}
+
+; run: %br_table_12(81985529216486895, 4369, 0) == 5247073869855711775
+; run: %br_table_12(81985529216486895, 4369, 1) == 5247073869855711776
+; run: %br_table_12(81985529216486895, 4369, 2) == 5247073869855711777
+; run: %br_table_12(81985529216486895, 4369, 3) == 5247073869855711778
+; run: %br_table_12(81985529216486895, 4369, 99) == 5247073869855711778
+
+function %func_addr_12(i64, i64) -> i64 {
+    fn0 = %callee(i64) -> i64
+
+block0(v0: i64, v1: i64):
+    v3 = iconst.i64 1
+    v10 = iadd v0, v1
+    v11 = rotl v10, v3
+    v12 = iadd v11, v1
+    v13 = rotl v12, v3
+    v14 = iadd v13, v1
+    v15 = rotl v14, v3
+    v16 = iadd v15, v1
+    v17 = rotl v16, v3
+    v18 = iadd v17, v1
+    v19 = rotl v18, v3
+    v20 = iadd v19, v1
+    v21 = rotl v20, v3
+    v200 = func_addr.i64 fn0
+    v201 = call_indirect sig0, v200(v21)
+    return v201
+}
+
+; run: %func_addr_12(81985529216486895, 4369) == 5247073869855711784
+
+function %br_table_13(i64, i64, i32) -> i64 {
+block0(v0: i64, v1: i64, v2: i32):
+    v3 = iconst.i64 1
+    v10 = iadd v0, v1
+    v11 = rotl v10, v3
+    v12 = iadd v11, v1
+    v13 = rotl v12, v3
+    v14 = iadd v13, v1
+    v15 = rotl v14, v3
+    v16 = iadd v15, v1
+    v17 = rotl v16, v3
+    v18 = iadd v17, v1
+    v19 = rotl v18, v3
+    v20 = iadd v19, v1
+    v21 = rotl v20, v3
+    v22 = iadd v21, v1
+    br_table v2, block4, [block1, block2, block3]
+block1:
+    v101 = iconst.i64 1
+    v111 = iadd v22, v101
+    return v111
+block2:
+    v102 = iconst.i64 2
+    v112 = iadd v22, v102
+    return v112
+block3:
+    v103 = iconst.i64 3
+    v113 = iadd v22, v103
+    return v113
+block4:
+    v104 = iconst.i64 4
+    v114 = iadd v22, v104
+    return v114
+}
+
+; run: %br_table_13(81985529216486895, 4369, 0) == 5247073869855716144
+; run: %br_table_13(81985529216486895, 4369, 1) == 5247073869855716145
+; run: %br_table_13(81985529216486895, 4369, 2) == 5247073869855716146
+; run: %br_table_13(81985529216486895, 4369, 3) == 5247073869855716147
+; run: %br_table_13(81985529216486895, 4369, 99) == 5247073869855716147
+
+function %func_addr_13(i64, i64) -> i64 {
+    fn0 = %callee(i64) -> i64
+
+block0(v0: i64, v1: i64):
+    v3 = iconst.i64 1
+    v10 = iadd v0, v1
+    v11 = rotl v10, v3
+    v12 = iadd v11, v1
+    v13 = rotl v12, v3
+    v14 = iadd v13, v1
+    v15 = rotl v14, v3
+    v16 = iadd v15, v1
+    v17 = rotl v16, v3
+    v18 = iadd v17, v1
+    v19 = rotl v18, v3
+    v20 = iadd v19, v1
+    v21 = rotl v20, v3
+    v22 = iadd v21, v1
+    v200 = func_addr.i64 fn0
+    v201 = call_indirect sig0, v200(v22)
+    return v201
+}
+
+; run: %func_addr_13(81985529216486895, 4369) == 5247073869855716153
+
+function %br_table_14(i64, i64, i32) -> i64 {
+block0(v0: i64, v1: i64, v2: i32):
+    v3 = iconst.i64 1
+    v10 = iadd v0, v1
+    v11 = rotl v10, v3
+    v12 = iadd v11, v1
+    v13 = rotl v12, v3
+    v14 = iadd v13, v1
+    v15 = rotl v14, v3
+    v16 = iadd v15, v1
+    v17 = rotl v16, v3
+    v18 = iadd v17, v1
+    v19 = rotl v18, v3
+    v20 = iadd v19, v1
+    v21 = rotl v20, v3
+    v22 = iadd v21, v1
+    v23 = rotl v22, v3
+    br_table v2, block4, [block1, block2, block3]
+block1:
+    v101 = iconst.i64 1
+    v111 = iadd v23, v101
+    return v111
+block2:
+    v102 = iconst.i64 2
+    v112 = iadd v23, v102
+    return v112
+block3:
+    v103 = iconst.i64 3
+    v113 = iadd v23, v103
+    return v113
+block4:
+    v104 = iconst.i64 4
+    v114 = iadd v23, v104
+    return v114
+}
+
+; run: %br_table_14(81985529216486895, 4369, 0) == -7952596333998119329
+; run: %br_table_14(81985529216486895, 4369, 1) == -7952596333998119328
+; run: %br_table_14(81985529216486895, 4369, 2) == -7952596333998119327
+; run: %br_table_14(81985529216486895, 4369, 3) == -7952596333998119326
+; run: %br_table_14(81985529216486895, 4369, 99) == -7952596333998119326
+
+function %func_addr_14(i64, i64) -> i64 {
+    fn0 = %callee(i64) -> i64
+
+block0(v0: i64, v1: i64):
+    v3 = iconst.i64 1
+    v10 = iadd v0, v1
+    v11 = rotl v10, v3
+    v12 = iadd v11, v1
+    v13 = rotl v12, v3
+    v14 = iadd v13, v1
+    v15 = rotl v14, v3
+    v16 = iadd v15, v1
+    v17 = rotl v16, v3
+    v18 = iadd v17, v1
+    v19 = rotl v18, v3
+    v20 = iadd v19, v1
+    v21 = rotl v20, v3
+    v22 = iadd v21, v1
+    v23 = rotl v22, v3
+    v200 = func_addr.i64 fn0
+    v201 = call_indirect sig0, v200(v23)
+    return v201
+}
+
+; run: %func_addr_14(81985529216486895, 4369) == -7952596333998119320
+
+function %br_table_15(i64, i64, i32) -> i64 {
+block0(v0: i64, v1: i64, v2: i32):
+    v3 = iconst.i64 1
+    v10 = iadd v0, v1
+    v11 = rotl v10, v3
+    v12 = iadd v11, v1
+    v13 = rotl v12, v3
+    v14 = iadd v13, v1
+    v15 = rotl v14, v3
+    v16 = iadd v15, v1
+    v17 = rotl v16, v3
+    v18 = iadd v17, v1
+    v19 = rotl v18, v3
+    v20 = iadd v19, v1
+    v21 = rotl v20, v3
+    v22 = iadd v21, v1
+    v23 = rotl v22, v3
+    v24 = iadd v23, v1
+    br_table v2, block4, [block1, block2, block3]
+block1:
+    v101 = iconst.i64 1
+    v111 = iadd v24, v101
+    return v111
+block2:
+    v102 = iconst.i64 2
+    v112 = iadd v24, v102
+    return v112
+block3:
+    v103 = iconst.i64 3
+    v113 = iadd v24, v103
+    return v113
+block4:
+    v104 = iconst.i64 4
+    v114 = iadd v24, v104
+    return v114
+}
+
+; run: %br_table_15(81985529216486895, 4369, 0) == -7952596333998114960
+; run: %br_table_15(81985529216486895, 4369, 1) == -7952596333998114959
+; run: %br_table_15(81985529216486895, 4369, 2) == -7952596333998114958
+; run: %br_table_15(81985529216486895, 4369, 3) == -7952596333998114957
+; run: %br_table_15(81985529216486895, 4369, 99) == -7952596333998114957
+
+function %func_addr_15(i64, i64) -> i64 {
+    fn0 = %callee(i64) -> i64
+
+block0(v0: i64, v1: i64):
+    v3 = iconst.i64 1
+    v10 = iadd v0, v1
+    v11 = rotl v10, v3
+    v12 = iadd v11, v1
+    v13 = rotl v12, v3
+    v14 = iadd v13, v1
+    v15 = rotl v14, v3
+    v16 = iadd v15, v1
+    v17 = rotl v16, v3
+    v18 = iadd v17, v1
+    v19 = rotl v18, v3
+    v20 = iadd v19, v1
+    v21 = rotl v20, v3
+    v22 = iadd v21, v1
+    v23 = rotl v22, v3
+    v24 = iadd v23, v1
+    v200 = func_addr.i64 fn0
+    v201 = call_indirect sig0, v200(v24)
+    return v201
+}
+
+; run: %func_addr_15(81985529216486895, 4369) == -7952596333998114951
+
+function %br_table_16(i64, i64, i32) -> i64 {
+block0(v0: i64, v1: i64, v2: i32):
+    v3 = iconst.i64 1
+    v10 = iadd v0, v1
+    v11 = rotl v10, v3
+    v12 = iadd v11, v1
+    v13 = rotl v12, v3
+    v14 = iadd v13, v1
+    v15 = rotl v14, v3
+    v16 = iadd v15, v1
+    v17 = rotl v16, v3
+    v18 = iadd v17, v1
+    v19 = rotl v18, v3
+    v20 = iadd v19, v1
+    v21 = rotl v20, v3
+    v22 = iadd v21, v1
+    v23 = rotl v22, v3
+    v24 = iadd v23, v1
+    v25 = rotl v24, v3
+    br_table v2, block4, [block1, block2, block3]
+block1:
+    v101 = iconst.i64 1
+    v111 = iadd v25, v101
+    return v111
+block2:
+    v102 = iconst.i64 2
+    v112 = iadd v25, v102
+    return v112
+block3:
+    v103 = iconst.i64 3
+    v113 = iadd v25, v103
+    return v113
+block4:
+    v104 = iconst.i64 4
+    v114 = iadd v25, v104
+    return v114
+}
+
+; run: %br_table_16(81985529216486895, 4369, 0) == 2541551405713321696
+; run: %br_table_16(81985529216486895, 4369, 1) == 2541551405713321697
+; run: %br_table_16(81985529216486895, 4369, 2) == 2541551405713321698
+; run: %br_table_16(81985529216486895, 4369, 3) == 2541551405713321699
+; run: %br_table_16(81985529216486895, 4369, 99) == 2541551405713321699
+
+function %func_addr_16(i64, i64) -> i64 {
+    fn0 = %callee(i64) -> i64
+
+block0(v0: i64, v1: i64):
+    v3 = iconst.i64 1
+    v10 = iadd v0, v1
+    v11 = rotl v10, v3
+    v12 = iadd v11, v1
+    v13 = rotl v12, v3
+    v14 = iadd v13, v1
+    v15 = rotl v14, v3
+    v16 = iadd v15, v1
+    v17 = rotl v16, v3
+    v18 = iadd v17, v1
+    v19 = rotl v18, v3
+    v20 = iadd v19, v1
+    v21 = rotl v20, v3
+    v22 = iadd v21, v1
+    v23 = rotl v22, v3
+    v24 = iadd v23, v1
+    v25 = rotl v24, v3
+    v200 = func_addr.i64 fn0
+    v201 = call_indirect sig0, v200(v25)
+    return v201
+}
+
+; run: %func_addr_16(81985529216486895, 4369) == 2541551405713321705
+
+function %br_table_17(i64, i64, i32) -> i64 {
+block0(v0: i64, v1: i64, v2: i32):
+    v3 = iconst.i64 1
+    v10 = iadd v0, v1
+    v11 = rotl v10, v3
+    v12 = iadd v11, v1
+    v13 = rotl v12, v3
+    v14 = iadd v13, v1
+    v15 = rotl v14, v3
+    v16 = iadd v15, v1
+    v17 = rotl v16, v3
+    v18 = iadd v17, v1
+    v19 = rotl v18, v3
+    v20 = iadd v19, v1
+    v21 = rotl v20, v3
+    v22 = iadd v21, v1
+    v23 = rotl v22, v3
+    v24 = iadd v23, v1
+    v25 = rotl v24, v3
+    v26 = iadd v25, v1
+    br_table v2, block4, [block1, block2, block3]
+block1:
+    v101 = iconst.i64 1
+    v111 = iadd v26, v101
+    return v111
+block2:
+    v102 = iconst.i64 2
+    v112 = iadd v26, v102
+    return v112
+block3:
+    v103 = iconst.i64 3
+    v113 = iadd v26, v103
+    return v113
+block4:
+    v104 = iconst.i64 4
+    v114 = iadd v26, v104
+    return v114
+}
+
+; run: %br_table_17(81985529216486895, 4369, 0) == 2541551405713326065
+; run: %br_table_17(81985529216486895, 4369, 1) == 2541551405713326066
+; run: %br_table_17(81985529216486895, 4369, 2) == 2541551405713326067
+; run: %br_table_17(81985529216486895, 4369, 3) == 2541551405713326068
+; run: %br_table_17(81985529216486895, 4369, 99) == 2541551405713326068
+
+function %func_addr_17(i64, i64) -> i64 {
+    fn0 = %callee(i64) -> i64
+
+block0(v0: i64, v1: i64):
+    v3 = iconst.i64 1
+    v10 = iadd v0, v1
+    v11 = rotl v10, v3
+    v12 = iadd v11, v1
+    v13 = rotl v12, v3
+    v14 = iadd v13, v1
+    v15 = rotl v14, v3
+    v16 = iadd v15, v1
+    v17 = rotl v16, v3
+    v18 = iadd v17, v1
+    v19 = rotl v18, v3
+    v20 = iadd v19, v1
+    v21 = rotl v20, v3
+    v22 = iadd v21, v1
+    v23 = rotl v22, v3
+    v24 = iadd v23, v1
+    v25 = rotl v24, v3
+    v26 = iadd v25, v1
+    v200 = func_addr.i64 fn0
+    v201 = call_indirect sig0, v200(v26)
+    return v201
+}
+
+; run: %func_addr_17(81985529216486895, 4369) == 2541551405713326074
+
+function %br_table_18(i64, i64, i32) -> i64 {
+block0(v0: i64, v1: i64, v2: i32):
+    v3 = iconst.i64 1
+    v10 = iadd v0, v1
+    v11 = rotl v10, v3
+    v12 = iadd v11, v1
+    v13 = rotl v12, v3
+    v14 = iadd v13, v1
+    v15 = rotl v14, v3
+    v16 = iadd v15, v1
+    v17 = rotl v16, v3
+    v18 = iadd v17, v1
+    v19 = rotl v18, v3
+    v20 = iadd v19, v1
+    v21 = rotl v20, v3
+    v22 = iadd v21, v1
+    v23 = rotl v22, v3
+    v24 = iadd v23, v1
+    v25 = rotl v24, v3
+    v26 = iadd v25, v1
+    v27 = rotl v26, v3
+    br_table v2, block4, [block1, block2, block3]
+block1:
+    v101 = iconst.i64 1
+    v111 = iadd v27, v101
+    return v111
+block2:
+    v102 = iconst.i64 2
+    v112 = iadd v27, v102
+    return v112
+block3:
+    v103 = iconst.i64 3
+    v113 = iadd v27, v103
+    return v113
+block4:
+    v104 = iconst.i64 4
+    v114 = iadd v27, v104
+    return v114
+}
+
+; run: %br_table_18(81985529216486895, 4369, 0) == 5083102811426652129
+; run: %br_table_18(81985529216486895, 4369, 1) == 5083102811426652130
+; run: %br_table_18(81985529216486895, 4369, 2) == 5083102811426652131
+; run: %br_table_18(81985529216486895, 4369, 3) == 5083102811426652132
+; run: %br_table_18(81985529216486895, 4369, 99) == 5083102811426652132
+
+function %func_addr_18(i64, i64) -> i64 {
+    fn0 = %callee(i64) -> i64
+
+block0(v0: i64, v1: i64):
+    v3 = iconst.i64 1
+    v10 = iadd v0, v1
+    v11 = rotl v10, v3
+    v12 = iadd v11, v1
+    v13 = rotl v12, v3
+    v14 = iadd v13, v1
+    v15 = rotl v14, v3
+    v16 = iadd v15, v1
+    v17 = rotl v16, v3
+    v18 = iadd v17, v1
+    v19 = rotl v18, v3
+    v20 = iadd v19, v1
+    v21 = rotl v20, v3
+    v22 = iadd v21, v1
+    v23 = rotl v22, v3
+    v24 = iadd v23, v1
+    v25 = rotl v24, v3
+    v26 = iadd v25, v1
+    v27 = rotl v26, v3
+    v200 = func_addr.i64 fn0
+    v201 = call_indirect sig0, v200(v27)
+    return v201
+}
+
+; run: %func_addr_18(81985529216486895, 4369) == 5083102811426652138
+
+function %br_table_19(i64, i64, i32) -> i64 {
+block0(v0: i64, v1: i64, v2: i32):
+    v3 = iconst.i64 1
+    v10 = iadd v0, v1
+    v11 = rotl v10, v3
+    v12 = iadd v11, v1
+    v13 = rotl v12, v3
+    v14 = iadd v13, v1
+    v15 = rotl v14, v3
+    v16 = iadd v15, v1
+    v17 = rotl v16, v3
+    v18 = iadd v17, v1
+    v19 = rotl v18, v3
+    v20 = iadd v19, v1
+    v21 = rotl v20, v3
+    v22 = iadd v21, v1
+    v23 = rotl v22, v3
+    v24 = iadd v23, v1
+    v25 = rotl v24, v3
+    v26 = iadd v25, v1
+    v27 = rotl v26, v3
+    v28 = iadd v27, v1
+    br_table v2, block4, [block1, block2, block3]
+block1:
+    v101 = iconst.i64 1
+    v111 = iadd v28, v101
+    return v111
+block2:
+    v102 = iconst.i64 2
+    v112 = iadd v28, v102
+    return v112
+block3:
+    v103 = iconst.i64 3
+    v113 = iadd v28, v103
+    return v113
+block4:
+    v104 = iconst.i64 4
+    v114 = iadd v28, v104
+    return v114
+}
+
+; run: %br_table_19(81985529216486895, 4369, 0) == 5083102811426656498
+; run: %br_table_19(81985529216486895, 4369, 1) == 5083102811426656499
+; run: %br_table_19(81985529216486895, 4369, 2) == 5083102811426656500
+; run: %br_table_19(81985529216486895, 4369, 3) == 5083102811426656501
+; run: %br_table_19(81985529216486895, 4369, 99) == 5083102811426656501
+
+function %func_addr_19(i64, i64) -> i64 {
+    fn0 = %callee(i64) -> i64
+
+block0(v0: i64, v1: i64):
+    v3 = iconst.i64 1
+    v10 = iadd v0, v1
+    v11 = rotl v10, v3
+    v12 = iadd v11, v1
+    v13 = rotl v12, v3
+    v14 = iadd v13, v1
+    v15 = rotl v14, v3
+    v16 = iadd v15, v1
+    v17 = rotl v16, v3
+    v18 = iadd v17, v1
+    v19 = rotl v18, v3
+    v20 = iadd v19, v1
+    v21 = rotl v20, v3
+    v22 = iadd v21, v1
+    v23 = rotl v22, v3
+    v24 = iadd v23, v1
+    v25 = rotl v24, v3
+    v26 = iadd v25, v1
+    v27 = rotl v26, v3
+    v28 = iadd v27, v1
+    v200 = func_addr.i64 fn0
+    v201 = call_indirect sig0, v200(v28)
+    return v201
+}
+
+; run: %func_addr_19(81985529216486895, 4369) == 5083102811426656507
+
+function %br_table_20(i64, i64, i32) -> i64 {
+block0(v0: i64, v1: i64, v2: i32):
+    v3 = iconst.i64 1
+    v10 = iadd v0, v1
+    v11 = rotl v10, v3
+    v12 = iadd v11, v1
+    v13 = rotl v12, v3
+    v14 = iadd v13, v1
+    v15 = rotl v14, v3
+    v16 = iadd v15, v1
+    v17 = rotl v16, v3
+    v18 = iadd v17, v1
+    v19 = rotl v18, v3
+    v20 = iadd v19, v1
+    v21 = rotl v20, v3
+    v22 = iadd v21, v1
+    v23 = rotl v22, v3
+    v24 = iadd v23, v1
+    v25 = rotl v24, v3
+    v26 = iadd v25, v1
+    v27 = rotl v26, v3
+    v28 = iadd v27, v1
+    v29 = rotl v28, v3
+    br_table v2, block4, [block1, block2, block3]
+block1:
+    v101 = iconst.i64 1
+    v111 = iadd v29, v101
+    return v111
+block2:
+    v102 = iconst.i64 2
+    v112 = iadd v29, v102
+    return v112
+block3:
+    v103 = iconst.i64 3
+    v113 = iadd v29, v103
+    return v113
+block4:
+    v104 = iconst.i64 4
+    v114 = iadd v29, v104
+    return v114
+}
+
+; run: %br_table_20(81985529216486895, 4369, 0) == -8280538450856238621
+; run: %br_table_20(81985529216486895, 4369, 1) == -8280538450856238620
+; run: %br_table_20(81985529216486895, 4369, 2) == -8280538450856238619
+; run: %br_table_20(81985529216486895, 4369, 3) == -8280538450856238618
+; run: %br_table_20(81985529216486895, 4369, 99) == -8280538450856238618
+
+function %func_addr_20(i64, i64) -> i64 {
+    fn0 = %callee(i64) -> i64
+
+block0(v0: i64, v1: i64):
+    v3 = iconst.i64 1
+    v10 = iadd v0, v1
+    v11 = rotl v10, v3
+    v12 = iadd v11, v1
+    v13 = rotl v12, v3
+    v14 = iadd v13, v1
+    v15 = rotl v14, v3
+    v16 = iadd v15, v1
+    v17 = rotl v16, v3
+    v18 = iadd v17, v1
+    v19 = rotl v18, v3
+    v20 = iadd v19, v1
+    v21 = rotl v20, v3
+    v22 = iadd v21, v1
+    v23 = rotl v22, v3
+    v24 = iadd v23, v1
+    v25 = rotl v24, v3
+    v26 = iadd v25, v1
+    v27 = rotl v26, v3
+    v28 = iadd v27, v1
+    v29 = rotl v28, v3
+    v200 = func_addr.i64 fn0
+    v201 = call_indirect sig0, v200(v29)
+    return v201
+}
+
+; run: %func_addr_20(81985529216486895, 4369) == -8280538450856238612
+
+function %br_table_21(i64, i64, i32) -> i64 {
+block0(v0: i64, v1: i64, v2: i32):
+    v3 = iconst.i64 1
+    v10 = iadd v0, v1
+    v11 = rotl v10, v3
+    v12 = iadd v11, v1
+    v13 = rotl v12, v3
+    v14 = iadd v13, v1
+    v15 = rotl v14, v3
+    v16 = iadd v15, v1
+    v17 = rotl v16, v3
+    v18 = iadd v17, v1
+    v19 = rotl v18, v3
+    v20 = iadd v19, v1
+    v21 = rotl v20, v3
+    v22 = iadd v21, v1
+    v23 = rotl v22, v3
+    v24 = iadd v23, v1
+    v25 = rotl v24, v3
+    v26 = iadd v25, v1
+    v27 = rotl v26, v3
+    v28 = iadd v27, v1
+    v29 = rotl v28, v3
+    v30 = iadd v29, v1
+    br_table v2, block4, [block1, block2, block3]
+block1:
+    v101 = iconst.i64 1
+    v111 = iadd v30, v101
+    return v111
+block2:
+    v102 = iconst.i64 2
+    v112 = iadd v30, v102
+    return v112
+block3:
+    v103 = iconst.i64 3
+    v113 = iadd v30, v103
+    return v113
+block4:
+    v104 = iconst.i64 4
+    v114 = iadd v30, v104
+    return v114
+}
+
+; run: %br_table_21(81985529216486895, 4369, 0) == -8280538450856234252
+; run: %br_table_21(81985529216486895, 4369, 1) == -8280538450856234251
+; run: %br_table_21(81985529216486895, 4369, 2) == -8280538450856234250
+; run: %br_table_21(81985529216486895, 4369, 3) == -8280538450856234249
+; run: %br_table_21(81985529216486895, 4369, 99) == -8280538450856234249
+
+function %func_addr_21(i64, i64) -> i64 {
+    fn0 = %callee(i64) -> i64
+
+block0(v0: i64, v1: i64):
+    v3 = iconst.i64 1
+    v10 = iadd v0, v1
+    v11 = rotl v10, v3
+    v12 = iadd v11, v1
+    v13 = rotl v12, v3
+    v14 = iadd v13, v1
+    v15 = rotl v14, v3
+    v16 = iadd v15, v1
+    v17 = rotl v16, v3
+    v18 = iadd v17, v1
+    v19 = rotl v18, v3
+    v20 = iadd v19, v1
+    v21 = rotl v20, v3
+    v22 = iadd v21, v1
+    v23 = rotl v22, v3
+    v24 = iadd v23, v1
+    v25 = rotl v24, v3
+    v26 = iadd v25, v1
+    v27 = rotl v26, v3
+    v28 = iadd v27, v1
+    v29 = rotl v28, v3
+    v30 = iadd v29, v1
+    v200 = func_addr.i64 fn0
+    v201 = call_indirect sig0, v200(v30)
+    return v201
+}
+
+; run: %func_addr_21(81985529216486895, 4369) == -8280538450856234243
+
+function %br_table_22(i64, i64, i32) -> i64 {
+block0(v0: i64, v1: i64, v2: i32):
+    v3 = iconst.i64 1
+    v10 = iadd v0, v1
+    v11 = rotl v10, v3
+    v12 = iadd v11, v1
+    v13 = rotl v12, v3
+    v14 = iadd v13, v1
+    v15 = rotl v14, v3
+    v16 = iadd v15, v1
+    v17 = rotl v16, v3
+    v18 = iadd v17, v1
+    v19 = rotl v18, v3
+    v20 = iadd v19, v1
+    v21 = rotl v20, v3
+    v22 = iadd v21, v1
+    v23 = rotl v22, v3
+    v24 = iadd v23, v1
+    v25 = rotl v24, v3
+    v26 = iadd v25, v1
+    v27 = rotl v26, v3
+    v28 = iadd v27, v1
+    v29 = rotl v28, v3
+    v30 = iadd v29, v1
+    v31 = rotl v30, v3
+    br_table v2, block4, [block1, block2, block3]
+block1:
+    v101 = iconst.i64 1
+    v111 = iadd v31, v101
+    return v111
+block2:
+    v102 = iconst.i64 2
+    v112 = iadd v31, v102
+    return v112
+block3:
+    v103 = iconst.i64 3
+    v113 = iadd v31, v103
+    return v113
+block4:
+    v104 = iconst.i64 4
+    v114 = iadd v31, v104
+    return v114
+}
+
+; run: %br_table_22(81985529216486895, 4369, 0) == 1885667171997083112
+; run: %br_table_22(81985529216486895, 4369, 1) == 1885667171997083113
+; run: %br_table_22(81985529216486895, 4369, 2) == 1885667171997083114
+; run: %br_table_22(81985529216486895, 4369, 3) == 1885667171997083115
+; run: %br_table_22(81985529216486895, 4369, 99) == 1885667171997083115
+
+function %func_addr_22(i64, i64) -> i64 {
+    fn0 = %callee(i64) -> i64
+
+block0(v0: i64, v1: i64):
+    v3 = iconst.i64 1
+    v10 = iadd v0, v1
+    v11 = rotl v10, v3
+    v12 = iadd v11, v1
+    v13 = rotl v12, v3
+    v14 = iadd v13, v1
+    v15 = rotl v14, v3
+    v16 = iadd v15, v1
+    v17 = rotl v16, v3
+    v18 = iadd v17, v1
+    v19 = rotl v18, v3
+    v20 = iadd v19, v1
+    v21 = rotl v20, v3
+    v22 = iadd v21, v1
+    v23 = rotl v22, v3
+    v24 = iadd v23, v1
+    v25 = rotl v24, v3
+    v26 = iadd v25, v1
+    v27 = rotl v26, v3
+    v28 = iadd v27, v1
+    v29 = rotl v28, v3
+    v30 = iadd v29, v1
+    v31 = rotl v30, v3
+    v200 = func_addr.i64 fn0
+    v201 = call_indirect sig0, v200(v31)
+    return v201
+}
+
+; run: %func_addr_22(81985529216486895, 4369) == 1885667171997083121
+
+function %br_table_23(i64, i64, i32) -> i64 {
+block0(v0: i64, v1: i64, v2: i32):
+    v3 = iconst.i64 1
+    v10 = iadd v0, v1
+    v11 = rotl v10, v3
+    v12 = iadd v11, v1
+    v13 = rotl v12, v3
+    v14 = iadd v13, v1
+    v15 = rotl v14, v3
+    v16 = iadd v15, v1
+    v17 = rotl v16, v3
+    v18 = iadd v17, v1
+    v19 = rotl v18, v3
+    v20 = iadd v19, v1
+    v21 = rotl v20, v3
+    v22 = iadd v21, v1
+    v23 = rotl v22, v3
+    v24 = iadd v23, v1
+    v25 = rotl v24, v3
+    v26 = iadd v25, v1
+    v27 = rotl v26, v3
+    v28 = iadd v27, v1
+    v29 = rotl v28, v3
+    v30 = iadd v29, v1
+    v31 = rotl v30, v3
+    v32 = iadd v31, v1
+    br_table v2, block4, [block1, block2, block3]
+block1:
+    v101 = iconst.i64 1
+    v111 = iadd v32, v101
+    return v111
+block2:
+    v102 = iconst.i64 2
+    v112 = iadd v32, v102
+    return v112
+block3:
+    v103 = iconst.i64 3
+    v113 = iadd v32, v103
+    return v113
+block4:
+    v104 = iconst.i64 4
+    v114 = iadd v32, v104
+    return v114
+}
+
+; run: %br_table_23(81985529216486895, 4369, 0) == 1885667171997087481
+; run: %br_table_23(81985529216486895, 4369, 1) == 1885667171997087482
+; run: %br_table_23(81985529216486895, 4369, 2) == 1885667171997087483
+; run: %br_table_23(81985529216486895, 4369, 3) == 1885667171997087484
+; run: %br_table_23(81985529216486895, 4369, 99) == 1885667171997087484
+
+function %func_addr_23(i64, i64) -> i64 {
+    fn0 = %callee(i64) -> i64
+
+block0(v0: i64, v1: i64):
+    v3 = iconst.i64 1
+    v10 = iadd v0, v1
+    v11 = rotl v10, v3
+    v12 = iadd v11, v1
+    v13 = rotl v12, v3
+    v14 = iadd v13, v1
+    v15 = rotl v14, v3
+    v16 = iadd v15, v1
+    v17 = rotl v16, v3
+    v18 = iadd v17, v1
+    v19 = rotl v18, v3
+    v20 = iadd v19, v1
+    v21 = rotl v20, v3
+    v22 = iadd v21, v1
+    v23 = rotl v22, v3
+    v24 = iadd v23, v1
+    v25 = rotl v24, v3
+    v26 = iadd v25, v1
+    v27 = rotl v26, v3
+    v28 = iadd v27, v1
+    v29 = rotl v28, v3
+    v30 = iadd v29, v1
+    v31 = rotl v30, v3
+    v32 = iadd v31, v1
+    v200 = func_addr.i64 fn0
+    v201 = call_indirect sig0, v200(v32)
+    return v201
+}
+
+; run: %func_addr_23(81985529216486895, 4369) == 1885667171997087490
